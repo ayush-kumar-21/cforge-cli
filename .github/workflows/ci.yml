@@ -38,4 +38,8 @@ jobs:
 
       - run: cargo clippy --all-targets -- -D warnings
 
-      - run: cargo test
+      # --test-threads=1: several tests sandbox themselves via
+      # std::env::set_current_dir, which is a process-global mutation, not
+      # per-thread. Running them in parallel (cargo test's default) races
+      # tests against each other's cwd and fails intermittently.
+      - run: cargo test -- --test-threads=1
