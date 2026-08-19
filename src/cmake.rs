@@ -44,24 +44,6 @@ pub fn get_cmake_var(path: &Path, var: &str) -> Option<String> {
     parse_cmake_var(&content, var)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_matching_var() {
-        let content = "set(CMAKE_CXX_STANDARD 20)\nset(CMAKE_C_STANDARD 17)\n";
-        assert_eq!(parse_cmake_var(content, "CMAKE_CXX_STANDARD"), Some("20".to_string()));
-        assert_eq!(parse_cmake_var(content, "CMAKE_C_STANDARD"), Some("17".to_string()));
-    }
-
-    #[test]
-    fn missing_var_is_none() {
-        let content = "set(CMAKE_CXX_STANDARD 20)\n";
-        assert_eq!(parse_cmake_var(content, "CMAKE_OBJC_STANDARD"), None);
-    }
-}
-
 pub fn latest_c_std() -> Option<String> {
     for s in ["23", "17", "11"] {
         if probe_std(c_compiler(), &format!("-std=c{s}"), "c") {
@@ -367,4 +349,22 @@ pub fn generate_cmakelists(project_name: &str) -> String {
     }
     out.push_str(BODY);
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_matching_var() {
+        let content = "set(CMAKE_CXX_STANDARD 20)\nset(CMAKE_C_STANDARD 17)\n";
+        assert_eq!(parse_cmake_var(content, "CMAKE_CXX_STANDARD"), Some("20".to_string()));
+        assert_eq!(parse_cmake_var(content, "CMAKE_C_STANDARD"), Some("17".to_string()));
+    }
+
+    #[test]
+    fn missing_var_is_none() {
+        let content = "set(CMAKE_CXX_STANDARD 20)\n";
+        assert_eq!(parse_cmake_var(content, "CMAKE_OBJC_STANDARD"), None);
+    }
 }

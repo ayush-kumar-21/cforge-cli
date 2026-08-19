@@ -36,8 +36,8 @@ pub fn compiler_for(lang: &str) -> Option<String> {
 }
 
 pub fn list() {
-    println!("cc:  {}", command_exists("cc").then(|| "found").unwrap_or("not found"));
-    println!("c++: {}", command_exists("c++").then(|| "found").unwrap_or("not found"));
+    println!("cc:  {}", if command_exists("cc") { "found" } else { "not found" });
+    println!("c++: {}", if command_exists("c++") { "found" } else { "not found" });
     if os() == Os::Macos {
         let xcode = platform::run_capture("xcode-select", &["-p"]).unwrap_or_else(|| "not found".to_string());
         println!("xcode-select: {xcode}");
