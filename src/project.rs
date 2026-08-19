@@ -191,7 +191,15 @@ pub fn init() {
     crate::cmake::generate_cforge_config();
 
     let cfg = Config::load();
-    let dirs = cfg.all_src_dirs().into_iter().chain(std::iter::once(cfg.paths.build.as_str()));
+    // Only create directories for languages actually enabled for this
+    // project (langs.txt if it's already been written, else the platform
+    // default set) — not all 5 unconditionally. Otherwise every project
+    // gets a Swift/ folder (opt-in only) and, on Windows, dead Obj_C/
+    // Obj_CPP folders that can never be built.
+    let enabled = read_langs_file();
+    let enabled: Vec<&str> = if enabled.is_empty() { all_langs().to_vec() } else { enabled.iter().map(|s| s.as_str()).collect() };
+    let src_dirs = enabled.iter().map(|lang| cfg.src_dir(lang));
+    let dirs = src_dirs.chain(std::iter::once(cfg.paths.build.as_str()));
     for dir in dirs {
         fs::create_dir_all(dir).unwrap_or_else(|e| {
             eprintln!("Error: could not create {dir}: {e}");
@@ -220,8 +228,26 @@ pub fn new_project(name: &str, langs: &[String]) {
     });
 
     ensure_compiler();
+    // An explicit --lang list is the exact set for this project, not an
+    // addition to the platform defaults — `lang_add` (used by `lang add`,
+    // where "add to what's there" is the right semantics) would otherwise
+    // just merge it into the full default set. Empty means "no --lang
+    // given", which still means "all platform-supported languages".
+    let mut explicit: Vec<String> = if langs.is_empty() {
+        all_langs().iter().map(|s| s.to_string()).collect()
+    } else {
+        for l in langs {
+            validate_lang(l);
+        }
+        langs.to_vec()
+    };
+    explicit.sort();
+    explicit.dedup();
+    write_langs_file(&explicit);
+    platform::status(&format!("Configured project for: {}", explicit.join(" ")));
+    // init() reads langs.txt (written above) to decide which source
+    // directories to create.
     init();
-    lang_add(langs);
 }
 
 pub fn info() {

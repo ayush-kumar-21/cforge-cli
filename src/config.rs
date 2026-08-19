@@ -90,16 +90,6 @@ impl Config {
         }
     }
 
-    /// Get all source directories (for discovering all targets).
-    pub fn all_src_dirs(&self) -> [&str; 5] {
-        [
-            &self.paths.c_src,
-            &self.paths.cpp_src,
-            &self.paths.obj_c_src,
-            &self.paths.obj_cpp_src,
-            &self.paths.swift_src,
-        ]
-    }
 }
 
 impl Default for Config {
