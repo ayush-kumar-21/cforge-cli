@@ -69,17 +69,7 @@ fn install_objc_macos(wait: bool) {
     if crate::flags::get().dry_run {
         return;
     }
-    platform::status("Waiting for the Command Line Tools install to finish...");
-    let mut waited = 0;
-    while platform::run_capture("xcode-select", &["-p"]).is_none() {
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        waited += 5;
-        if waited >= 1800 {
-            eprintln!("Error: timed out waiting for the Command Line Tools installer.");
-            std::process::exit(1);
-        }
-    }
-    platform::status("Command Line Tools installed.");
+    platform::wait_for_xcode_clt();
 }
 
 fn install_objc_linux(runtime: &str) {

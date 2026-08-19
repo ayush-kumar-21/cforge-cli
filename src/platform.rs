@@ -326,6 +326,25 @@ pub fn install_pkg(pkg: &str) {
     }
 }
 
+/// Blocks until `xcode-select -p` reports the Command Line Tools are
+/// present, or 30 minutes pass. Shared by `ensure_compiler` (hit
+/// mid-`new`/`build` on a fresh machine, where there's no one to ask
+/// whether to wait) and `toolchain::install_objc_macos` (the explicit
+/// `toolchain install obj_c` path, which does ask via its `wait` flag).
+pub fn wait_for_xcode_clt() {
+    println!("Waiting for the Command Line Tools install to finish...");
+    let mut waited = 0;
+    while run_capture("xcode-select", &["-p"]).is_none() {
+        std::thread::sleep(std::time::Duration::from_secs(5));
+        waited += 5;
+        if waited >= 1800 {
+            eprintln!("Error: timed out waiting for the Command Line Tools installer.");
+            std::process::exit(1);
+        }
+    }
+    println!("Command Line Tools installed.");
+}
+
 pub fn ensure_compiler() {
     if command_exists(c_compiler()) {
         return;
@@ -334,8 +353,15 @@ pub fn ensure_compiler() {
         Os::Macos => {
             println!("Xcode Command Line Tools not found; opening the installer...");
             run("xcode-select", &["--install"]);
-            eprintln!("Error: finish the Command Line Tools install popup, then re-run this command.");
-            std::process::exit(4);
+            if crate::flags::get().dry_run {
+                return;
+            }
+            // A first-time machine hits this mid-`new`/`build`, not via an
+            // explicit `toolchain install` — there's no one to ask whether
+            // to wait, and making them re-run the same command by hand
+            // once the GUI installer finishes is exactly the friction this
+            // is supposed to remove. So: always wait.
+            wait_for_xcode_clt();
         }
         Os::Linux => {
             println!("C/C++ compiler not found; installing...");
