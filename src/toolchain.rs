@@ -9,6 +9,7 @@ use crate::color;
 use crate::platform::{self, command_exists, ensure_pkg_manager, install_pkg, os, run_or_die, Os, PkgManager};
 use crate::project::validate_lang;
 use std::fs;
+use std::io::{IsTerminal, Write};
 use std::path::Path;
 
 const TOOLCHAIN_FILE: &str = "toolchain.txt";
@@ -36,8 +37,15 @@ pub fn compiler_for(lang: &str) -> Option<String> {
 }
 
 pub fn list() {
-    println!("cc:  {}", if command_exists("cc") { "found" } else { "not found" });
-    println!("c++: {}", if command_exists("c++") { "found" } else { "not found" });
+    let found = platform::detect_compilers();
+    if found.is_empty() {
+        println!("No C/C++ compiler found (run 'cforge build' and cforge will install one).");
+    } else {
+        println!("Detected compilers:");
+        for c in &found {
+            println!("  {} ({} / {})", c.version, c.c, c.cxx);
+        }
+    }
     if os() == Os::Macos {
         let xcode = platform::run_capture("xcode-select", &["-p"]).unwrap_or_else(|| "not found".to_string());
         println!("xcode-select: {xcode}");
@@ -48,6 +56,85 @@ pub fn list() {
         println!("project overrides ({TOOLCHAIN_FILE}):");
         for (k, v) in entries {
             println!("  {k}={v}");
+        }
+    }
+}
+
+/// Ensures this project has a compiler chosen, installing one first if the
+/// machine has none.
+///
+/// The three cases a fresh user hits:
+///
+/// * No compiler at all: `ensure_compiler` installs one, nothing to pick.
+/// * Exactly one: use it, and don't write toolchain.txt at all — an
+///   unpinned project keeps following the system default, which is the
+///   friendlier behaviour if they later switch compilers.
+/// * More than one: ask, and pin the answer to toolchain.txt so it's
+///   asked exactly once per project.
+///
+/// Idempotent: returns immediately once toolchain.txt names a compiler, so
+/// this is safe to call on every build.
+pub fn ensure_compiler_selected() {
+    // Unconditionally first: a project can be pinned to a compiler on a
+    // machine that has none (fresh clone of someone else's repo), and that
+    // still needs the install. Cheap when one is already present.
+    platform::ensure_compiler();
+    if compiler_for("c").is_some() || compiler_for("cpp").is_some() {
+        return;
+    }
+
+    let found = platform::detect_compilers();
+    if found.len() < 2 {
+        return;
+    }
+
+    // Never block for input where nothing can answer: CI, a piped stdin, or
+    // --quiet (which is a request for no chatter, not a hidden prompt).
+    // --dry-run additionally must not write toolchain.txt.
+    let flags = crate::flags::get();
+    let interactive = std::io::stdin().is_terminal() && !flags.quiet && !flags.dry_run;
+    if !interactive {
+        platform::status(&format!(
+            "Multiple compilers detected; using {} (run 'cforge toolchain use c <compiler>' to change).",
+            found[0].version
+        ));
+        return;
+    }
+
+    println!("Multiple C/C++ compilers found on this system:");
+    for (i, c) in found.iter().enumerate() {
+        println!("  {}) {}", i + 1, c.version);
+    }
+    let choice = prompt_index(found.len());
+    let picked = &found[choice];
+
+    write_toolchain_file(&[("c".to_string(), picked.c.clone()), ("cpp".to_string(), picked.cxx.clone())]);
+    platform::status(&format!(
+        "Using {} for this project ({} / {}). Change it any time with 'cforge toolchain use'.",
+        picked.version, picked.c, picked.cxx
+    ));
+}
+
+/// Reads a 1-based menu choice, re-asking until it's in range. EOF (^D, or
+/// stdin closing mid-prompt) falls back to the first entry rather than
+/// looping forever on a stream that will never produce input again.
+fn prompt_index(len: usize) -> usize {
+    loop {
+        print!("Select a compiler for this project [1-{len}] (default 1): ");
+        let _ = std::io::stdout().flush();
+
+        let mut line = String::new();
+        match std::io::stdin().read_line(&mut line) {
+            Ok(0) | Err(_) => return 0,
+            Ok(_) => {}
+        }
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            return 0;
+        }
+        match trimmed.parse::<usize>() {
+            Ok(n) if n >= 1 && n <= len => return n - 1,
+            _ => eprintln!("Please enter a number between 1 and {len}."),
         }
     }
 }

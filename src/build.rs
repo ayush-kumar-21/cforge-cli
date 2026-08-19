@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::platform::{
-    self, command_exists, ensure_cmake, ensure_compiler, ensure_ninja, ensure_pkg_manager, ensure_vcpkg,
+    self, command_exists, ensure_cmake, ensure_ninja, ensure_pkg_manager, ensure_vcpkg,
     install_pkg, os, vcpkg_exe, vcpkg_root, vcpkg_toolchain_file, vcpkg_triplet, Os, PkgManager,
 };
 use std::fs;
@@ -296,7 +296,9 @@ fn resolve_or_die(name: &str) -> TargetFile {
 }
 
 fn configure(build_dir: &Path) {
-    ensure_compiler();
+    // Installs a compiler if the machine has none, and picks between them
+    // if it has several. No-op once this project has one pinned.
+    crate::toolchain::ensure_compiler_selected();
     ensure_cmake();
     if os() == Os::Windows {
         ensure_ninja();

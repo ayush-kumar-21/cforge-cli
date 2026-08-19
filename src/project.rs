@@ -1,6 +1,6 @@
 use crate::cmake::generate_cmakelists;
 use crate::config::Config;
-use crate::platform::{self, ensure_compiler, os, Os};
+use crate::platform::{self, os, Os};
 use std::fs;
 use std::path::Path;
 
@@ -217,7 +217,9 @@ pub fn new_project(name: &str, langs: &[String]) {
         std::process::exit(1);
     });
 
-    ensure_compiler();
+    // Installs a compiler if there's none, and asks which to use if the
+    // machine has several — so the project is ready to build on exit.
+    crate::toolchain::ensure_compiler_selected();
     // An explicit --lang list is the exact set for this project, not an
     // addition to the platform defaults — `lang_add` (used by `lang add`,
     // where "add to what's there" is the right semantics) would otherwise

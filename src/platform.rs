@@ -179,6 +179,57 @@ pub fn resolve_real_gnu_compiler(name: &str) -> Option<String> {
     None
 }
 
+/// A distinct C/C++ toolchain found on this machine. `c`/`cxx` are the
+/// actual binary names cmake should be pointed at (not families), so they
+/// pass through `toolchain::resolve_binary` unchanged.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DetectedCompiler {
+    pub c: String,
+    pub cxx: String,
+    /// First line of `--version`, used both as the dedupe key and as the
+    /// human-readable label when asking which one to use.
+    pub version: String,
+}
+
+/// Every *distinct* C/C++ compiler on PATH.
+///
+/// Deduping by version string rather than binary name is the whole point:
+/// on a stock macOS, `cc`, `clang`, `gcc` and `g++` are four names for one
+/// Apple clang, and offering them as four choices would be noise. Real GNU
+/// GCC installs alongside as versioned binaries (`gcc-16`), which report a
+/// different version string and so survive the dedupe as a genuine second
+/// option.
+pub fn detect_compilers() -> Vec<DetectedCompiler> {
+    let mut candidates: Vec<(String, String)> = vec![
+        ("clang".to_string(), "clang++".to_string()),
+        ("gcc".to_string(), "g++".to_string()),
+    ];
+    // Homebrew/apt install real GNU GCC as gcc-N; newest first so it wins
+    // the dedupe over an older parallel install of the same toolchain.
+    for major in (9..=20).rev() {
+        candidates.push((format!("gcc-{major}"), format!("g++-{major}")));
+    }
+    // `cc`/`c++` last: they're aliases for whatever the platform default
+    // is, so they only survive the dedupe if nothing above matched them.
+    if os() != Os::Windows {
+        candidates.push(("cc".to_string(), "c++".to_string()));
+    }
+
+    let mut found: Vec<DetectedCompiler> = Vec::new();
+    for (c, cxx) in candidates {
+        if !command_exists(&c) || !command_exists(&cxx) {
+            continue;
+        }
+        let Some(out) = run_capture(&c, &["--version"]) else { continue };
+        let version = out.lines().next().unwrap_or_default().trim().to_string();
+        if version.is_empty() || found.iter().any(|f| f.version == version) {
+            continue;
+        }
+        found.push(DetectedCompiler { c, cxx, version });
+    }
+    found
+}
+
 /// Probes whether `compiler -std=<flag> -x <lang> -E -` accepts an empty
 /// input without erroring, same technique the original bash version used.
 pub fn probe_std(compiler: &str, std_flag: &str, lang: &str) -> bool {
