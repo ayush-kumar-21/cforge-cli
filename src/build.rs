@@ -24,7 +24,32 @@ pub enum ResolvedTarget {
 /// and (macOS/Linux only) `<base>/Obj_C/<name>.m`, `<base>/Obj_CPP/<name>.mm`.
 /// Takes `base` as a parameter (rather than always using ".") so tests can
 /// point it at a scratch directory instead of racing on process cwd.
+///
+/// If `name` itself carries one of those extensions (e.g. "creditCard.c"),
+/// that's a direct pointer to a single file/language — checked on its own
+/// without touching the other directories, so it can never come back
+/// Ambiguous. This is the only way to build/run one half of two files that
+/// share a base name across languages (`C/creditCard.c` and
+/// `CPP/creditCard.cpp`), since the bare name is genuinely ambiguous
+/// between them.
 pub fn resolve_target_in(base: &Path, name: &str) -> ResolvedTarget {
+    let name_path = Path::new(name);
+    if let (Some(stem), Some(ext)) =
+        (name_path.file_stem().and_then(|s| s.to_str()), name_path.extension().and_then(|e| e.to_str()))
+    {
+        let qualified: Option<(&str, &'static str)> = match ext {
+            "c" => Some(("C", "c")),
+            "cpp" => Some(("CPP", "cpp")),
+            "m" if crate::project::objc_capable_platform() => Some(("Obj_C", "objc")),
+            "mm" if crate::project::objc_capable_platform() => Some(("Obj_CPP", "objcpp")),
+            _ => None,
+        };
+        if let Some((dir, suffix)) = qualified {
+            let path = base.join(dir).join(format!("{stem}.{ext}"));
+            return if path.is_file() { ResolvedTarget::Found(TargetFile { path, suffix }) } else { ResolvedTarget::NotFound };
+        }
+    }
+
     let mut candidates = vec![
         (base.join("C").join(format!("{name}.c")), "c"),
         (base.join("CPP").join(format!("{name}.cpp")), "cpp"),
@@ -257,7 +282,19 @@ fn discover_all_targets() -> Vec<TargetFile> {
         .into_iter()
         .filter_map(|name| match resolve_target(&name) {
             ResolvedTarget::Found(t) => Some(t),
-            _ => None,
+            ResolvedTarget::NotFound => None,
+            // Two files sharing a base name across languages (e.g.
+            // C/creditCard.c and CPP/creditCard.cpp) can't both become a
+            // plain `creditCard` build target — silently dropping both, as
+            // this used to do, meant a `cforge build` with no arguments
+            // built neither and said nothing. Warn and skip instead; the
+            // extension-qualified form (`cforge build creditCard.c`)
+            // builds either one explicitly.
+            ResolvedTarget::Ambiguous(paths) => {
+                let list = paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
+                eprintln!("warning: '{name}' is ambiguous ({list}) — skipped. Build it explicitly, e.g. 'cforge build {name}.c'.");
+                None
+            }
         })
         .collect()
 }
@@ -290,7 +327,9 @@ fn resolve_or_die(name: &str) -> TargetFile {
         }
         ResolvedTarget::Ambiguous(paths) => {
             let list = paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ");
-            crate::usage_error(&format!("'{name}' is ambiguous: found {list}"));
+            crate::usage_error(&format!(
+                "'{name}' is ambiguous: found {list} — disambiguate with the extension, e.g. 'cforge build {name}.c' or 'cforge build {name}.cpp'"
+            ));
         }
     }
 }

@@ -159,7 +159,9 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
              Configures and builds. With no targets, builds every source file found\n\
              across the enabled languages' directories. A target name is resolved by\n\
              checking C/<name>.c, CPP/<name>.cpp, and (macOS only) Obj_C/<name>.m,\n\
-             Obj_CPP/<name>.mm; a name matching more than one is an error.",
+             Obj_CPP/<name>.mm. If two languages share a base name (C/foo.c and\n\
+             CPP/foo.cpp both exist), 'foo' is ambiguous — give the extension to\n\
+             pick one: 'cforge build foo.c' or 'cforge build foo.cpp'.",
         ),
         ("run", _) => Some(
             "Usage: cforge run <target> [-- <args>...]\n\n\
