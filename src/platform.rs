@@ -413,10 +413,7 @@ pub fn ensure_cmake() {
 /// binary, unlike a multi-GB Visual Studio Build Tools install.
 /// Package name for "ninja" isn't uniform: apt/dnf/yum/zypper/apk call it
 /// `ninja-build`, everyone else (brew, pacman, winget) calls it `ninja`
-/// (winget's id is `Ninja-build.Ninja`). This was previously winget-only
-/// dead reckoning left over from when `ensure_ninja` was only ever called
-/// on Windows; it's now called on every platform once Swift is enabled
-/// (CMake's Swift support requires the Ninja generator).
+/// (winget's id is `Ninja-build.Ninja`).
 pub fn ensure_ninja() {
     if command_exists("ninja") {
         return;

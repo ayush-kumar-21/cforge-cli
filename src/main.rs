@@ -85,9 +85,7 @@ pub fn usage() -> ! {
     row("--no-color", "", "Disable ANSI color (also respects NO_COLOR)");
     row("--dry-run", "", "Print actions (including local file writes) without executing them");
     println!();
-    println!("lang = c|cpp|obj_c|obj_cpp|swift (obj_c/obj_cpp: full support on macOS, GNUstep caveats on Linux, unsupported on Windows;");
-    println!("                                  swift: full support on macOS, server-side/CLI only on Linux/Windows (no Apple frameworks);");
-    println!("                                         opt-in only, not part of the default set — enable with --lang swift / lang add swift)");
+    println!("lang = c|cpp|obj_c|obj_cpp (obj_c/obj_cpp: full support on macOS, GNUstep caveats on Linux, unsupported on Windows)");
     println!("std keys = c|cxx|objc|objcpp (same four languages, spelled to match CMAKE_<X>_STANDARD)");
     println!();
     println!("Run 'cforge new <name>' to scaffold a new project directory, or 'cforge init' to use the current directory as-is.");
@@ -107,8 +105,6 @@ pub fn usage() -> ! {
         "cforge clean --all",
         "cforge toolchain install obj_c",
         "cforge toolchain install cpp --compiler gcc --version 14",
-        "cforge lang add swift",
-        "cforge generate main --lang swift",
         "cforge doctor",
         "cforge std set --all latest",
         "cforge std set cxx 20",
@@ -147,7 +143,7 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
              creates C/CPP/Obj_C/Obj_CPP/build directories, and enables the given\n\
              languages (default: all platform-supported languages).\n\n\
              Options:\n\
-             \x20\x20--lang <lang>...   Languages to enable (c|cpp|obj_c|obj_cpp|swift)\n\
+             \x20\x20--lang <lang>...   Languages to enable (c|cpp|obj_c|obj_cpp)\n\
              \x20\x20--ffi rust         Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  links against it — for Rust projects calling into C/C++.",
@@ -194,7 +190,7 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
         ),
         ("toolchain", Some("install")) => Some(
             "Usage: cforge toolchain install <lang> [--compiler <name>] [--version <v>] [--runtime <r>] [--wait]\n\n\
-             Installs a compiler/runtime for <lang> (c|cpp|obj_c|obj_cpp|swift).\n\
+             Installs a compiler/runtime for <lang> (c|cpp|obj_c|obj_cpp).\n\
              --compiler <gcc|clang|mingw|msvc|apple-clang>  (c/cpp only)\n\
              --version <v>       Compiler version, where the package manager supports it\n\
              --runtime <r>       obj_c/obj_cpp on Linux: gnustep|libobjc2 (default gnustep)\n\
@@ -213,7 +209,7 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
         ("toolchain", Some("list")) => Some("Usage: cforge toolchain list\n\nShows detected cc/c++ and any project overrides in toolchain.txt."),
         ("toolchain", Some("default")) => Some("Usage: cforge toolchain default\n\nResets toolchain.txt, returning to system-default compilers."),
         ("toolchain", _) => Some("Usage: cforge toolchain list|install|use|default|remove ...\n\nRun 'cforge toolchain <subcommand> -h' for details on a specific one."),
-        ("lang", Some("add")) => Some("Usage: cforge lang add <lang>...\n\nEnables the given languages (c|cpp|obj_c|obj_cpp|swift) for the build."),
+        ("lang", Some("add")) => Some("Usage: cforge lang add <lang>...\n\nEnables the given languages (c|cpp|obj_c|obj_cpp) for the build."),
         ("lang", Some("remove")) => Some("Usage: cforge lang remove <lang>...\n\nDisables the given languages from the build."),
         ("lang", _) => Some("Usage: cforge lang add|remove|list <lang>..."),
         ("std", Some("set")) => Some(
@@ -238,7 +234,7 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
         ("lint", _) => Some("Usage: cforge lint [path...]\n\nRuns clang-tidy over the given paths (default: all source dirs)."),
         ("compdb", _) => Some("Usage: cforge compdb\n\nWrites compile_commands.json at the project root."),
         ("config", Some("show")) => Some("Usage: cforge config show\n\nShows current .cforge.toml settings (source directories, build dir)."),
-        ("config", Some("set")) => Some("Usage: cforge config set <key> <path>\n\nSets a source directory path. Keys: c_src, cpp_src, obj_c_src, obj_cpp_src, swift_src, headers, build."),
+        ("config", Some("set")) => Some("Usage: cforge config set <key> <path>\n\nSets a source directory path. Keys: c_src, cpp_src, obj_c_src, obj_cpp_src, headers, build."),
         ("config", Some("reset")) => Some("Usage: cforge config reset\n\nResets all paths in .cforge.toml to defaults (C/, CPP/, Obj_C/, etc.)."),
         ("config", _) => Some("Usage: cforge config show|set|reset ...\n\nRun 'cforge config <subcommand> -h' for details on a specific one."),
         _ => None,
@@ -540,7 +536,6 @@ fn config_show() {
     println!("  cpp:       {}", cfg.src_dir("cpp"));
     println!("  obj_c:     {}", cfg.src_dir("obj_c"));
     println!("  obj_cpp:   {}", cfg.src_dir("obj_cpp"));
-    println!("  swift:     {}", cfg.src_dir("swift"));
     println!("  headers:   {}", cfg.paths.headers);
     println!("  build:     {}", cfg.paths.build);
 }
@@ -552,10 +547,9 @@ fn config_set(key: &str, path: &str) {
         "cpp_src" => cfg.paths.cpp_src = path.to_string(),
         "obj_c_src" => cfg.paths.obj_c_src = path.to_string(),
         "obj_cpp_src" => cfg.paths.obj_cpp_src = path.to_string(),
-        "swift_src" => cfg.paths.swift_src = path.to_string(),
         "headers" => cfg.paths.headers = path.to_string(),
         "build" => cfg.paths.build = path.to_string(),
-        other => usage_error(&format!("unknown config key '{other}' (expected c_src|cpp_src|obj_c_src|obj_cpp_src|swift_src|headers|build)")),
+        other => usage_error(&format!("unknown config key '{other}' (expected c_src|cpp_src|obj_c_src|obj_cpp_src|headers|build)")),
     }
     cfg.save();
     cmake::generate_cforge_config();

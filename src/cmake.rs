@@ -171,7 +171,6 @@ else()
     set(CFORGE_CPP_SRC "CPP")
     set(CFORGE_OBJ_C_SRC "Obj_C")
     set(CFORGE_OBJ_CPP_SRC "Obj_CPP")
-    set(CFORGE_SWIFT_SRC "Swift")
     set(CFORGE_HEADERS "include")
 endif()
 
@@ -208,15 +207,6 @@ if("obj_c" IN_LIST ENABLED_LANGS)
 endif()
 if("obj_cpp" IN_LIST ENABLED_LANGS)
     file(GLOB OBJCPP_FILES "${CFORGE_OBJ_CPP_SRC}/*.mm")
-endif()
-# Swift is enabled here (rather than in the initial project() LANGUAGES,
-# like C/CXX/OBJC/OBJCXX above) precisely so a project that never opts in
-# via `cforge lang add swift` never needs a Swift compiler to configure at
-# all. CMake's Swift support also only works with the Ninja or Xcode
-# generators, which `cforge build` only forces once Swift is enabled.
-if("swift" IN_LIST ENABLED_LANGS)
-    enable_language(Swift)
-    file(GLOB SWIFT_FILES "${CFORGE_SWIFT_SRC}/*.swift")
 endif()
 
 # Libraries added via `cforge add <name>` are tracked in libs.txt and
@@ -275,7 +265,6 @@ add_lang_executables("${C_FILES}" c FALSE)
 add_lang_executables("${CPP_FILES}" cpp FALSE)
 add_lang_executables("${OBJC_FILES}" objc TRUE)
 add_lang_executables("${OBJCPP_FILES}" objcpp TRUE)
-add_lang_executables("${SWIFT_FILES}" swift FALSE)
 
 # *_ffi.cpp files (from `cforge new --ffi rust`) build as a SHARED library
 # instead of an executable — that's what bindings/build.rs links the Rust
@@ -320,13 +309,11 @@ pub fn generate_cforge_config() {
          set(CFORGE_CPP_SRC \"{}\")\n\
          set(CFORGE_OBJ_C_SRC \"{}\")\n\
          set(CFORGE_OBJ_CPP_SRC \"{}\")\n\
-         set(CFORGE_SWIFT_SRC \"{}\")\n\
          set(CFORGE_HEADERS \"{}\")\n",
         cfg.src_dir("c"),
         cfg.src_dir("cpp"),
         cfg.src_dir("obj_c"),
         cfg.src_dir("obj_cpp"),
-        cfg.src_dir("swift"),
         cfg.paths.headers,
     );
     crate::platform::write_file(Path::new(".cforge_config.cmake"), &content);

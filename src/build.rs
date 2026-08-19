@@ -20,7 +20,7 @@ pub enum ResolvedTarget {
     Ambiguous(Vec<std::path::PathBuf>),
 }
 
-/// Checks `<base>/C/<name>.c`, `<base>/CPP/<name>.cpp`, `<base>/Swift/<name>.swift`,
+/// Checks `<base>/C/<name>.c`, `<base>/CPP/<name>.cpp`,
 /// and (macOS/Linux only) `<base>/Obj_C/<name>.m`, `<base>/Obj_CPP/<name>.mm`.
 /// Takes `base` as a parameter (rather than always using ".") so tests can
 /// point it at a scratch directory instead of racing on process cwd.
@@ -28,7 +28,6 @@ pub fn resolve_target_in(base: &Path, name: &str) -> ResolvedTarget {
     let mut candidates = vec![
         (base.join("C").join(format!("{name}.c")), "c"),
         (base.join("CPP").join(format!("{name}.cpp")), "cpp"),
-        (base.join("Swift").join(format!("{name}.swift")), "swift"),
     ];
     if crate::project::objc_capable_platform() {
         candidates.push((base.join("Obj_C").join(format!("{name}.m")), "objc"));
@@ -142,13 +141,6 @@ fn configure_extra_args() -> Vec<String> {
             }
         }
     }
-    if enabled_langs().iter().any(|l| l == "swift") {
-        ensure_ninja();
-        if !args.iter().any(|a| a == "-G") {
-            args.push("-G".to_string());
-            args.push("Ninja".to_string());
-        }
-    }
     args
 }
 
@@ -229,7 +221,6 @@ fn discover_all_targets() -> Vec<TargetFile> {
         vec![
             (cfg.src_dir("c"), "c", "c"),
             (cfg.src_dir("cpp"), "cpp", "cpp"),
-            (cfg.src_dir("swift"), "swift", "swift"),
             (cfg.src_dir("obj_c"), "m", "obj_c"),
             (cfg.src_dir("obj_cpp"), "mm", "obj_cpp"),
         ]
@@ -237,7 +228,6 @@ fn discover_all_targets() -> Vec<TargetFile> {
         vec![
             (cfg.src_dir("c"), "c", "c"),
             (cfg.src_dir("cpp"), "cpp", "cpp"),
-            (cfg.src_dir("swift"), "swift", "swift"),
         ]
     };
 
@@ -294,7 +284,7 @@ fn resolve_or_die(name: &str) -> TargetFile {
             t
         }
         ResolvedTarget::NotFound => {
-            eprintln!("Error: no source file found for target '{name}' (looked for C/{name}.c, CPP/{name}.cpp, Swift/{name}.swift{}).",
+            eprintln!("Error: no source file found for target '{name}' (looked for C/{name}.c, CPP/{name}.cpp{}).",
                 if crate::project::objc_capable_platform() { format!(", Obj_C/{name}.m, Obj_CPP/{name}.mm") } else { String::new() });
             std::process::exit(1);
         }

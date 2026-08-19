@@ -4,7 +4,7 @@ use crate::platform::{self, ensure_compiler, os, Os};
 use std::fs;
 use std::path::Path;
 
-const KNOWN_LANGS: &[&str] = &["c", "cpp", "obj_c", "obj_cpp", "swift"];
+const KNOWN_LANGS: &[&str] = &["c", "cpp", "obj_c", "obj_cpp"];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LangCapability {
@@ -29,11 +29,6 @@ pub fn lang_capability(lang: &str) -> LangCapability {
             Os::Linux => LangCapability::Caveats,
             _ => LangCapability::Unsupported,
         },
-        "swift" => match os() {
-            Os::Macos => LangCapability::Supported,
-            Os::Linux | Os::Windows => LangCapability::Caveats,
-            Os::Unknown => LangCapability::Unsupported,
-        },
         other => unreachable!("lang_capability called with unknown language '{other}'"),
     }
 }
@@ -49,11 +44,7 @@ pub fn objc_capable_platform() -> bool {
 /// Platform-supported languages, used as the default set when nothing is
 /// pinned in langs.txt. Matches the bash version's
 /// `default_langs_for_platform()`: every known language except on
-/// Windows, where obj_c/obj_cpp have no viable toolchain at all. Swift is
-/// deliberately excluded from this default set — it's always opt-in via
-/// `--lang swift` / `lang add swift`, since (unlike c/cpp/obj_c/obj_cpp)
-/// it isn't reliably auto-installable on every platform and forces the
-/// Ninja generator once enabled.
+/// Windows, where obj_c/obj_cpp have no viable toolchain at all.
 pub fn all_langs() -> &'static [&'static str] {
     if objc_capable_platform() { &["c", "cpp", "obj_c", "obj_cpp"] } else { &["c", "cpp"] }
 }
@@ -85,9 +76,9 @@ pub(crate) fn read_langs_file() -> Vec<String> {
 pub fn lang_add(langs: &[String]) {
     let mut current = read_langs_file();
     // No langs.txt yet: seed with platform defaults *before* applying the
-    // requested add, so `lang add swift` on a fresh project extends the
-    // default set instead of replacing it with just "swift" (a real
-    // regression this fixes — it previously only seeded defaults when
+    // requested add, so `lang add <lang>` on a fresh project extends the
+    // default set instead of replacing it with just that one language (a
+    // real regression this fixes — it previously only seeded defaults when
     // called with no arguments at all).
     if current.is_empty() {
         current = all_langs().iter().map(|s| s.to_string()).collect();
@@ -142,7 +133,6 @@ pub fn generate(name: &str, ext: &str) {
         "cpp" => (cfg.src_dir("cpp"), "cpp"),
         "obj_c" => (cfg.src_dir("obj_c"), "m"),
         "obj_cpp" => (cfg.src_dir("obj_cpp"), "mm"),
-        "swift" => (cfg.src_dir("swift"), "swift"),
         _ => unreachable!("validate_lang already rejected anything else"),
     };
     let file = Path::new(dir).join(format!("{name}.{file_ext}"));
@@ -193,9 +183,9 @@ pub fn init() {
     let cfg = Config::load();
     // Only create directories for languages actually enabled for this
     // project (langs.txt if it's already been written, else the platform
-    // default set) — not all 5 unconditionally. Otherwise every project
-    // gets a Swift/ folder (opt-in only) and, on Windows, dead Obj_C/
-    // Obj_CPP folders that can never be built.
+    // default set) — not all 4 unconditionally. Otherwise every project
+    // gets dead Obj_C/Obj_CPP folders on Windows, where they can never be
+    // built.
     let enabled = read_langs_file();
     let enabled: Vec<&str> = if enabled.is_empty() { all_langs().to_vec() } else { enabled.iter().map(|s| s.as_str()).collect() };
     let src_dirs = enabled.iter().map(|lang| cfg.src_dir(lang));

@@ -1,5 +1,5 @@
 //! `.cforge.toml` configuration — allows flexible source directory layouts.
-//! Default paths: C/, CPP/, Obj_C/, Obj_CPP/, Swift/ can be overridden per-project.
+//! Default paths: C/, CPP/, Obj_C/, Obj_CPP/ can be overridden per-project.
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -22,8 +22,6 @@ pub struct Paths {
     pub obj_c_src: String,
     #[serde(default = "default_obj_cpp_src")]
     pub obj_cpp_src: String,
-    #[serde(default = "default_swift_src")]
-    pub swift_src: String,
     #[serde(default = "default_headers")]
     pub headers: String,
     #[serde(default = "default_build")]
@@ -34,7 +32,6 @@ fn default_c_src() -> String { "C".to_string() }
 fn default_cpp_src() -> String { "CPP".to_string() }
 fn default_obj_c_src() -> String { "Obj_C".to_string() }
 fn default_obj_cpp_src() -> String { "Obj_CPP".to_string() }
-fn default_swift_src() -> String { "Swift".to_string() }
 fn default_headers() -> String { "include".to_string() }
 fn default_build() -> String { "build".to_string() }
 
@@ -44,7 +41,6 @@ fn default_paths() -> Paths {
         cpp_src: default_cpp_src(),
         obj_c_src: default_obj_c_src(),
         obj_cpp_src: default_obj_cpp_src(),
-        swift_src: default_swift_src(),
         headers: default_headers(),
         build: default_build(),
     }
@@ -85,7 +81,6 @@ impl Config {
             "cpp" => &self.paths.cpp_src,
             "obj_c" => &self.paths.obj_c_src,
             "obj_cpp" => &self.paths.obj_cpp_src,
-            "swift" => &self.paths.swift_src,
             _ => "src",
         }
     }
@@ -110,7 +105,6 @@ mod tests {
         assert_eq!(cfg.src_dir("c"), "C");
         assert_eq!(cfg.src_dir("cpp"), "CPP");
         assert_eq!(cfg.src_dir("obj_c"), "Obj_C");
-        assert_eq!(cfg.src_dir("swift"), "Swift");
     }
 
     #[test]

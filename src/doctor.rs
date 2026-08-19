@@ -96,30 +96,6 @@ pub fn run() {
         }
     }
 
-    // swift isn't in `all_langs()` (it's opt-in-only, see project.rs), so
-    // it's reported separately rather than through the loop above. On macOS,
-    // Swift has full support; on Linux/Windows, it's available but limited
-    // to server-side logic and CLIs (no Apple frameworks).
-    if crate::platform::command_exists("swiftc") {
-        let version = run_capture("swiftc", &["--version"]).unwrap_or_default();
-        if os() == Os::Macos {
-            println!("swift: {} ({})", green("ok"), version.lines().next().unwrap_or(""));
-        } else {
-            println!(
-                "swift: {} ({}, server-side only — no Apple frameworks)",
-                green("ok"),
-                version.lines().next().unwrap_or("")
-            );
-        }
-    } else {
-        let caveat = if os() == Os::Macos {
-            "opt-in; run: cforge toolchain install swift"
-        } else {
-            "opt-in (server-side only, no Apple frameworks); run: cforge toolchain install swift"
-        };
-        println!("swift: {} ({})", yellow("not installed"), caveat);
-    }
-
     if os() == Os::Macos {
         if let Some(v) = run_capture("xcrun", &["--sdk", "macosx", "--show-sdk-version"]) {
             println!("sdk: MacOSX{v}.sdk");
