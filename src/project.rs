@@ -140,7 +140,10 @@ pub fn generate(name: &str, ext: &str) {
         eprintln!("Error: {} already exists.", file.display());
         std::process::exit(1);
     }
-    fs::create_dir_all(dir).unwrap();
+    platform::create_dir_all(Path::new(dir)).unwrap_or_else(|e| {
+        eprintln!("Error: could not create {dir}: {e}");
+        std::process::exit(1);
+    });
     platform::write_file(&file, "");
     platform::status(&format!("Created {}", file.display()));
 }
@@ -191,7 +194,7 @@ pub fn init() {
     let src_dirs = enabled.iter().map(|lang| cfg.src_dir(lang));
     let dirs = src_dirs.chain(std::iter::once(cfg.paths.build.as_str()));
     for dir in dirs {
-        fs::create_dir_all(dir).unwrap_or_else(|e| {
+        platform::create_dir_all(Path::new(dir)).unwrap_or_else(|e| {
             eprintln!("Error: could not create {dir}: {e}");
             std::process::exit(1);
         });
@@ -208,14 +211,20 @@ pub fn new_project(name: &str, langs: &[String]) {
     if name.is_empty() {
         crate::usage_error("new requires a project name");
     }
-    fs::create_dir_all(name).unwrap_or_else(|e| {
+    platform::create_dir_all(Path::new(name)).unwrap_or_else(|e| {
         eprintln!("Error: could not create directory '{name}': {e}");
         std::process::exit(1);
     });
-    std::env::set_current_dir(name).unwrap_or_else(|e| {
-        eprintln!("Error: could not enter directory '{name}': {e}");
-        std::process::exit(1);
-    });
+    // Under --dry-run, create_dir_all above was a no-op, so `name` doesn't
+    // exist to cd into — the rest of this function runs against the
+    // current directory instead, which is why dry-run paths below print
+    // unprefixed by `name/`.
+    if !crate::flags::get().dry_run {
+        std::env::set_current_dir(name).unwrap_or_else(|e| {
+            eprintln!("Error: could not enter directory '{name}': {e}");
+            std::process::exit(1);
+        });
+    }
 
     // Installs a compiler if there's none, and asks which to use if the
     // machine has several — so the project is ready to build on exit.

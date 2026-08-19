@@ -146,6 +146,22 @@ pub fn write_file(path: &std::path::Path, content: &str) {
     });
 }
 
+/// `fs::create_dir_all`, or under `--dry-run` prints `+ mkdir -p <path>`
+/// instead of creating anything. The other half of `write_file`'s
+/// dry-run coverage: `cforge new`/`init`/`generate` create directories
+/// before writing into them, and those need the same gate or `--dry-run`
+/// still leaves real directories on disk despite "without executing them".
+pub fn create_dir_all(path: &std::path::Path) -> std::io::Result<()> {
+    let f = crate::flags::get();
+    if f.verbose >= 2 || f.dry_run {
+        println!("+ mkdir -p {}", path.display());
+    }
+    if f.dry_run {
+        return Ok(());
+    }
+    std::fs::create_dir_all(path)
+}
+
 /// Runs a command and returns its trimmed stdout on success. Ignores
 /// dry-run (callers use this to *query* state, e.g. `cmake --version`,
 /// never to mutate it), and does not print anything itself.

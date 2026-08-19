@@ -34,7 +34,7 @@ fn collect_source_files(paths: &[String]) -> Vec<PathBuf> {
 pub fn compdb() {
     ensure_cmake();
     let build_dir = Path::new("build");
-    fs::create_dir_all(build_dir).ok();
+    platform::create_dir_all(build_dir).ok();
     platform::run_or_die_in(
         build_dir,
         "cmake",

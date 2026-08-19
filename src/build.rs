@@ -307,7 +307,10 @@ fn configure(build_dir: &Path) {
             ensure_pkg_config_windows();
         }
     }
-    fs::create_dir_all(build_dir).unwrap();
+    platform::create_dir_all(build_dir).unwrap_or_else(|e| {
+        eprintln!("Error: could not create {}: {e}", build_dir.display());
+        std::process::exit(1);
+    });
 
     let flags = crate::flags::get();
     let mut args = configure_extra_args();

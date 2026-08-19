@@ -5,7 +5,6 @@
 //! C/C++, or a C/C++ library wants Rust bindings.
 use crate::config::Config;
 use crate::platform;
-use std::fs;
 use std::path::Path;
 
 /// Only "rust" is implemented; anything else is a usage error rather than
@@ -51,7 +50,7 @@ pub fn scaffold_rust_ffi(project_name: &str) {
 
 fn scaffold_c_abi_header(ident: &str, cfg: &Config) {
     let header_dir = Path::new(&cfg.paths.headers);
-    fs::create_dir_all(header_dir).unwrap_or_else(|e| {
+    platform::create_dir_all(header_dir).unwrap_or_else(|e| {
         eprintln!("Error: could not create {}: {e}", header_dir.display());
         std::process::exit(1);
     });
@@ -84,7 +83,7 @@ fn scaffold_c_abi_header(ident: &str, cfg: &Config) {
 
 fn scaffold_cpp_impl(ident: &str, cfg: &Config) {
     let cpp_dir = Path::new(&cfg.paths.cpp_src);
-    fs::create_dir_all(cpp_dir).unwrap_or_else(|e| {
+    platform::create_dir_all(cpp_dir).unwrap_or_else(|e| {
         eprintln!("Error: could not create {}: {e}", cpp_dir.display());
         std::process::exit(1);
     });
@@ -109,7 +108,7 @@ fn scaffold_cpp_impl(ident: &str, cfg: &Config) {
 fn scaffold_rust_crate(project_name: &str, ident: &str) {
     let bindings_dir = Path::new("bindings");
     let src_dir = bindings_dir.join("src");
-    fs::create_dir_all(&src_dir).unwrap_or_else(|e| {
+    platform::create_dir_all(&src_dir).unwrap_or_else(|e| {
         eprintln!("Error: could not create {}: {e}", src_dir.display());
         std::process::exit(1);
     });
