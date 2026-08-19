@@ -225,38 +225,73 @@ if(EXTRA_LIBS)
     endforeach()
 endif()
 
+# Shared by add_lang_executables (one file -> one executable) and
+# add_lang_apps (one directory of files -> one executable) below.
+function(link_extra_libs exec_name needs_foundation)
+    if(needs_foundation)
+        if(APPLE)
+            target_link_libraries(${exec_name} "-framework Foundation")
+        else()
+            # Linux Obj-C/Obj-C++ has no Foundation; GNUstep's base
+            # library is the closest equivalent. `cforge toolchain
+            # install obj_c` (Linux) installs gnustep-base and
+            # gnustep-config alongside it.
+            find_program(GNUSTEP_CONFIG gnustep-config)
+            if(GNUSTEP_CONFIG)
+                execute_process(COMMAND ${GNUSTEP_CONFIG} --objc-flags
+                    OUTPUT_VARIABLE GNUSTEP_OBJC_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
+                execute_process(COMMAND ${GNUSTEP_CONFIG} --base-libs
+                    OUTPUT_VARIABLE GNUSTEP_BASE_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
+                separate_arguments(GNUSTEP_OBJC_FLAGS_LIST UNIX_COMMAND "${GNUSTEP_OBJC_FLAGS}")
+                separate_arguments(GNUSTEP_BASE_LIBS_LIST UNIX_COMMAND "${GNUSTEP_BASE_LIBS}")
+                target_compile_options(${exec_name} PRIVATE ${GNUSTEP_OBJC_FLAGS_LIST})
+                target_link_libraries(${exec_name} ${GNUSTEP_BASE_LIBS_LIST})
+            else()
+                message(WARNING "gnustep-config not found; ${exec_name} will not link GNUstep base. Run 'cforge toolchain install obj_c' first.")
+            endif()
+        endif()
+    endif()
+    if(EXTRA_LIB_TARGETS)
+        target_link_libraries(${exec_name} ${EXTRA_LIB_TARGETS})
+    endif()
+endfunction()
+
 function(add_lang_executables files suffix needs_foundation)
     foreach(source_file ${files})
         get_filename_component(base_name ${source_file} NAME_WE)
         set(exec_name "${base_name}_${suffix}")
         add_executable(${exec_name} ${source_file})
-        if(needs_foundation)
-            if(APPLE)
-                target_link_libraries(${exec_name} "-framework Foundation")
-            else()
-                # Linux Obj-C/Obj-C++ has no Foundation; GNUstep's base
-                # library is the closest equivalent. `cforge toolchain
-                # install obj_c` (Linux) installs gnustep-base and
-                # gnustep-config alongside it.
-                find_program(GNUSTEP_CONFIG gnustep-config)
-                if(GNUSTEP_CONFIG)
-                    execute_process(COMMAND ${GNUSTEP_CONFIG} --objc-flags
-                        OUTPUT_VARIABLE GNUSTEP_OBJC_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-                    execute_process(COMMAND ${GNUSTEP_CONFIG} --base-libs
-                        OUTPUT_VARIABLE GNUSTEP_BASE_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
-                    separate_arguments(GNUSTEP_OBJC_FLAGS_LIST UNIX_COMMAND "${GNUSTEP_OBJC_FLAGS}")
-                    separate_arguments(GNUSTEP_BASE_LIBS_LIST UNIX_COMMAND "${GNUSTEP_BASE_LIBS}")
-                    target_compile_options(${exec_name} PRIVATE ${GNUSTEP_OBJC_FLAGS_LIST})
-                    target_link_libraries(${exec_name} ${GNUSTEP_BASE_LIBS_LIST})
-                else()
-                    message(WARNING "gnustep-config not found; ${exec_name} will not link GNUstep base. Run 'cforge toolchain install obj_c' first.")
-                endif()
+        link_extra_libs(${exec_name} ${needs_foundation})
+        list(APPEND ALL_EXEC_TARGETS ${exec_name})
+    endforeach()
+    set(ALL_EXEC_TARGETS ${ALL_EXEC_TARGETS} PARENT_SCOPE)
+endfunction()
+
+# A subdirectory directly under a language's source directory (e.g.
+# CPP/mygame/) whose files all share that language's extension becomes ONE
+# executable named after the directory, built from every matching file
+# inside it — the multi-file counterpart to a standalone CPP/foo.cpp file,
+# for programs that need more than one source file linked together (a
+# game's main.cpp + Player.cpp + Renderer.cpp as one binary, not three
+# separate, unlinked ones).
+function(add_lang_apps src_dir ext needs_foundation)
+    # IS_DIRECTORY/EXISTS in if() only have well-defined behavior with an
+    # absolute path — src_dir arrives as the relative "CPP"/"C"/etc., which
+    # silently evaluated false and made this return immediately every time.
+    set(abs_dir "${CMAKE_SOURCE_DIR}/${src_dir}")
+    if(NOT IS_DIRECTORY "${abs_dir}")
+        return()
+    endif()
+    file(GLOB app_entries RELATIVE "${abs_dir}" "${abs_dir}/*")
+    foreach(app_name ${app_entries})
+        if(IS_DIRECTORY "${abs_dir}/${app_name}")
+            file(GLOB app_sources "${abs_dir}/${app_name}/*.${ext}")
+            if(app_sources)
+                add_executable(${app_name} ${app_sources})
+                link_extra_libs(${app_name} ${needs_foundation})
+                list(APPEND ALL_EXEC_TARGETS ${app_name})
             endif()
         endif()
-        if(EXTRA_LIB_TARGETS)
-            target_link_libraries(${exec_name} ${EXTRA_LIB_TARGETS})
-        endif()
-        list(APPEND ALL_EXEC_TARGETS ${exec_name})
     endforeach()
     set(ALL_EXEC_TARGETS ${ALL_EXEC_TARGETS} PARENT_SCOPE)
 endfunction()
@@ -265,6 +300,19 @@ add_lang_executables("${C_FILES}" c FALSE)
 add_lang_executables("${CPP_FILES}" cpp FALSE)
 add_lang_executables("${OBJC_FILES}" objc TRUE)
 add_lang_executables("${OBJCPP_FILES}" objcpp TRUE)
+
+if("c" IN_LIST ENABLED_LANGS)
+    add_lang_apps("${CFORGE_C_SRC}" c FALSE)
+endif()
+if("cpp" IN_LIST ENABLED_LANGS)
+    add_lang_apps("${CFORGE_CPP_SRC}" cpp FALSE)
+endif()
+if("obj_c" IN_LIST ENABLED_LANGS)
+    add_lang_apps("${CFORGE_OBJ_C_SRC}" m TRUE)
+endif()
+if("obj_cpp" IN_LIST ENABLED_LANGS)
+    add_lang_apps("${CFORGE_OBJ_CPP_SRC}" mm TRUE)
+endif()
 
 # *_ffi.cpp files (from `cforge new --ffi rust`) build as a SHARED library
 # instead of an executable — that's what bindings/build.rs links the Rust

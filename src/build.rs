@@ -11,6 +11,11 @@ use std::process::Command;
 pub struct TargetFile {
     pub path: std::path::PathBuf,
     pub suffix: &'static str,
+    /// True for a directory of files linked into one executable (see
+    /// cmake.rs's `add_lang_apps`) — its CMake target name is the
+    /// directory name itself, not `<name>_<suffix>` like a standalone
+    /// single-file target.
+    pub is_app: bool,
 }
 
 #[derive(Debug)]
@@ -20,10 +25,29 @@ pub enum ResolvedTarget {
     Ambiguous(Vec<std::path::PathBuf>),
 }
 
+/// Per-language (directory, file extension, target-name suffix) triples,
+/// used by both file and app-directory resolution below.
+fn lang_dirs() -> Vec<(&'static str, &'static str, &'static str)> {
+    if crate::project::objc_capable_platform() {
+        vec![("C", "c", "c"), ("CPP", "cpp", "cpp"), ("Obj_C", "m", "objc"), ("Obj_CPP", "mm", "objcpp")]
+    } else {
+        vec![("C", "c", "c"), ("CPP", "cpp", "cpp")]
+    }
+}
+
+fn dir_contains_ext(dir: &Path, ext: &str) -> bool {
+    fs::read_dir(dir)
+        .map(|entries| entries.flatten().any(|e| e.path().extension().and_then(|x| x.to_str()) == Some(ext)))
+        .unwrap_or(false)
+}
+
 /// Checks `<base>/C/<name>.c`, `<base>/CPP/<name>.cpp`,
-/// and (macOS/Linux only) `<base>/Obj_C/<name>.m`, `<base>/Obj_CPP/<name>.mm`.
-/// Takes `base` as a parameter (rather than always using ".") so tests can
-/// point it at a scratch directory instead of racing on process cwd.
+/// and (macOS/Linux only) `<base>/Obj_C/<name>.m`, `<base>/Obj_CPP/<name>.mm`
+/// — a standalone single-file target — as well as `<base>/C/<name>/`,
+/// `<base>/CPP/<name>/`, etc. — a directory of same-language files linked
+/// into one app-style executable (see cmake.rs's `add_lang_apps`). Takes
+/// `base` as a parameter (rather than always using ".") so tests can point
+/// it at a scratch directory instead of racing on process cwd.
 ///
 /// If `name` itself carries one of those extensions (e.g. "creditCard.c"),
 /// that's a direct pointer to a single file/language — checked on its own
@@ -46,29 +70,30 @@ pub fn resolve_target_in(base: &Path, name: &str) -> ResolvedTarget {
         };
         if let Some((dir, suffix)) = qualified {
             let path = base.join(dir).join(format!("{stem}.{ext}"));
-            return if path.is_file() { ResolvedTarget::Found(TargetFile { path, suffix }) } else { ResolvedTarget::NotFound };
+            return if path.is_file() {
+                ResolvedTarget::Found(TargetFile { path, suffix, is_app: false })
+            } else {
+                ResolvedTarget::NotFound
+            };
         }
     }
 
-    let mut candidates = vec![
-        (base.join("C").join(format!("{name}.c")), "c"),
-        (base.join("CPP").join(format!("{name}.cpp")), "cpp"),
-    ];
-    if crate::project::objc_capable_platform() {
-        candidates.push((base.join("Obj_C").join(format!("{name}.m")), "objc"));
-        candidates.push((base.join("Obj_CPP").join(format!("{name}.mm")), "objcpp"));
+    let mut found: Vec<TargetFile> = Vec::new();
+    for (dir, ext, suffix) in lang_dirs() {
+        let file = base.join(dir).join(format!("{name}.{ext}"));
+        if file.is_file() {
+            found.push(TargetFile { path: file, suffix, is_app: false });
+        }
+        let app_dir = base.join(dir).join(name);
+        if app_dir.is_dir() && dir_contains_ext(&app_dir, ext) {
+            found.push(TargetFile { path: app_dir, suffix, is_app: true });
+        }
     }
-
-    let found: Vec<(std::path::PathBuf, &'static str)> =
-        candidates.into_iter().filter(|(p, _)| p.is_file()).collect();
 
     match found.len() {
         0 => ResolvedTarget::NotFound,
-        1 => {
-            let (path, suffix) = found.into_iter().next().unwrap();
-            ResolvedTarget::Found(TargetFile { path, suffix })
-        }
-        _ => ResolvedTarget::Ambiguous(found.into_iter().map(|(p, _)| p).collect()),
+        1 => ResolvedTarget::Found(found.into_iter().next().unwrap()),
+        _ => ResolvedTarget::Ambiguous(found.into_iter().map(|t| t.path).collect()),
     }
 }
 
@@ -119,6 +144,51 @@ mod resolve_tests {
         match resolve_target_in(&base, "nope") {
             ResolvedTarget::NotFound => {}
             other => panic!("expected NotFound, got {other:?}"),
+        }
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn finds_app_directory_as_one_target() {
+        let base = scratch_dir("app");
+        fs::create_dir_all(base.join("CPP").join("mygame")).unwrap();
+        fs::write(base.join("CPP").join("mygame").join("main.cpp"), "").unwrap();
+        fs::write(base.join("CPP").join("mygame").join("Player.cpp"), "").unwrap();
+        match resolve_target_in(&base, "mygame") {
+            ResolvedTarget::Found(t) => {
+                assert!(t.is_app);
+                assert_eq!(t.suffix, "cpp");
+                assert_eq!(t.path, base.join("CPP").join("mygame"));
+            }
+            other => panic!("expected Found (app), got {other:?}"),
+        }
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn empty_directory_is_not_an_app_target() {
+        let base = scratch_dir("emptyapp");
+        fs::create_dir_all(base.join("CPP").join("notanapp")).unwrap();
+        match resolve_target_in(&base, "notanapp") {
+            ResolvedTarget::NotFound => {}
+            other => panic!("expected NotFound, got {other:?}"),
+        }
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn extension_qualified_name_still_resolves_standalone_file() {
+        let base = scratch_dir("qualified");
+        fs::create_dir_all(base.join("C")).unwrap();
+        fs::create_dir_all(base.join("CPP")).unwrap();
+        fs::write(base.join("C").join("foo.c"), "").unwrap();
+        fs::write(base.join("CPP").join("foo.cpp"), "").unwrap();
+        match resolve_target_in(&base, "foo.c") {
+            ResolvedTarget::Found(t) => {
+                assert!(!t.is_app);
+                assert_eq!(t.suffix, "c");
+            }
+            other => panic!("expected Found, got {other:?}"),
         }
         fs::remove_dir_all(&base).unwrap();
     }
@@ -261,8 +331,21 @@ fn discover_all_targets() -> Vec<TargetFile> {
     for (dir, ext) in dirs {
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
-                if entry.path().extension().and_then(|e| e.to_str()) == Some(ext) {
-                    if let Some(stem) = entry.path().file_stem().and_then(|s| s.to_str()) {
+                let path = entry.path();
+                // A subdirectory containing at least one matching-extension
+                // file is an app target (cmake.rs's add_lang_apps); its
+                // name goes through the same resolve_target() call below
+                // as a standalone file's stem would.
+                if path.is_dir() {
+                    if let Some(dir_name) = path.file_name().and_then(|s| s.to_str()) {
+                        if dir_contains_ext(&path, ext) {
+                            names.insert(dir_name.to_string());
+                        }
+                    }
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) == Some(ext) {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
                         // *_ffi.cpp (from `cforge new --ffi rust`) builds as a
                         // SHARED library in CMakeLists.txt, not an executable —
                         // see cmake.rs's FFI_CPP_FILES handling. It has no
@@ -321,7 +404,7 @@ fn resolve_or_die(name: &str) -> TargetFile {
             t
         }
         ResolvedTarget::NotFound => {
-            eprintln!("Error: no source file found for target '{name}' (looked for C/{name}.c, CPP/{name}.cpp{}).",
+            eprintln!("Error: no source file or app directory found for target '{name}' (looked for C/{name}.c, CPP/{name}.cpp{}, or a C/{name}/ or CPP/{name}/ directory of sources).",
                 if crate::project::objc_capable_platform() { format!(", Obj_C/{name}.m, Obj_CPP/{name}.mm") } else { String::new() });
             std::process::exit(1);
         }
@@ -381,9 +464,20 @@ fn configure(build_dir: &Path) {
     }
 }
 
+/// The CMake target name for a resolved target: `<name>_<suffix>` for a
+/// standalone file (matches cmake.rs's `add_lang_executables`), or just
+/// the directory name for an app target (matches `add_lang_apps`).
+fn target_name(target_file: &TargetFile) -> String {
+    if target_file.is_app {
+        target_file.path.file_name().unwrap().to_string_lossy().to_string()
+    } else {
+        let stem = target_file.path.file_stem().unwrap().to_string_lossy().to_string();
+        format!("{stem}_{}", target_file.suffix)
+    }
+}
+
 fn build_target(build_dir: &Path, target_file: &TargetFile) -> String {
-    let name = target_file.path.file_stem().unwrap().to_string_lossy().to_string();
-    let target = format!("{name}_{}", target_file.suffix);
+    let target = target_name(target_file);
 
     let flags = crate::flags::get();
     let mut args = vec!["--build".to_string(), ".".to_string(), "--target".to_string(), target.clone()];
@@ -465,8 +559,7 @@ pub fn run(target: &str, program_args: &[String]) -> ! {
         std::process::exit(1);
     });
 
-    let name = target_file.path.file_stem().unwrap().to_string_lossy().to_string();
-    let exe_name = format!("{name}_{}", target_file.suffix);
+    let exe_name = target_name(&target_file);
     let build_dir = Path::new("build");
     let exe = build_dir.join(&exe_name);
 

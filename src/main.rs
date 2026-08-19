@@ -12,6 +12,7 @@ mod pkgmgr;
 mod platform;
 mod project;
 mod selfmgmt;
+mod templates;
 mod toolchain;
 mod version;
 
@@ -22,7 +23,7 @@ pub fn usage() -> ! {
     println!();
     println!("PROJECT SETUP");
     let row = |cmd: &str, args: &str, desc: &str| println!("    {cmd:<22} {args:<28} {desc}");
-    row("new", "<name> [--lang <lang>...] [--ffi rust]", "Scaffold a new project (dirs + CMakeLists.txt)");
+    row("new", "<name> [opts]", "Scaffold a new project; run 'cforge new -h' for --lang/--ffi/--template");
     row("init", "", "Initialize cforge in the current directory");
     row("info", "", "Show project config: languages, standards, libraries");
     println!();
@@ -96,6 +97,7 @@ pub fn usage() -> ! {
     for line in [
         "cforge new myapp",
         "cforge new myapp --lang c cpp",
+        "cforge new mygame --template game",
         "cforge init",
         "cforge info",
         "cforge build",
@@ -138,15 +140,17 @@ pub fn usage_error(msg: &str) -> ! {
 fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
     let text: Option<&str> = match (cmd, sub) {
         ("new", _) => Some(
-            "Usage: cforge new <name> [--lang <lang>...] [--ffi rust]\n\n\
+            "Usage: cforge new <name> [--lang <lang>...] [--ffi rust] [--template <name>]\n\n\
              Scaffolds a new project directory: creates <name>/, writes CMakeLists.txt,\n\
              creates C/CPP/Obj_C/Obj_CPP/build directories, and enables the given\n\
              languages (default: all platform-supported languages).\n\n\
              Options:\n\
-             \x20\x20--lang <lang>...   Languages to enable (c|cpp|obj_c|obj_cpp)\n\
-             \x20\x20--ffi rust         Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  links against it — for Rust projects calling into C/C++.",
+             \x20\x20--lang <lang>...     Languages to enable (c|cpp|obj_c|obj_cpp)\n\
+             \x20\x20--ffi rust           Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  links against it — for Rust projects calling into C/C++.\n\
+             \x20\x20--template <name>   Scaffold a real multi-file starter program into\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>/ as one linked executable (cli|game).",
         ),
         ("init", _) => Some(
             "Usage: cforge init\n\n\
@@ -297,6 +301,24 @@ fn split_ffi_flag(args: &[String]) -> (Option<String>, Vec<String>) {
     (ffi, remaining)
 }
 
+/// Pulls a single-valued "--template <name>" out of `args`, returning
+/// (Some(name), remaining_args) — same shape as `split_ffi_flag`.
+fn split_template_flag(args: &[String]) -> (Option<String>, Vec<String>) {
+    let mut template = None;
+    let mut remaining = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--template" {
+            i += 1;
+            template = args.get(i).cloned();
+        } else {
+            remaining.push(args[i].clone());
+        }
+        i += 1;
+    }
+    (template, remaining)
+}
+
 fn split_on_double_dash(args: &[String]) -> (Vec<String>, Vec<String>) {
     match args.iter().position(|a| a == "--") {
         Some(idx) => (args[..idx].to_vec(), args[idx + 1..].to_vec()),
@@ -364,6 +386,10 @@ fn main() {
         "new" => {
             let (langs, remaining) = split_lang_flag(args);
             let (ffi, remaining) = split_ffi_flag(&remaining);
+            let (template, remaining) = split_template_flag(&remaining);
+            if let Some(t) = &template {
+                templates::validate_template(t);
+            }
             let name = remaining.first().map(|s| s.as_str()).unwrap_or("");
             project::new_project(name, &langs);
             if let Some(target) = ffi {
@@ -373,6 +399,9 @@ fn main() {
                 // CMake project — not from `name`, which may be a path
                 // (`cforge new /tmp/foo` → dir basename "foo", not "_tmp_foo").
                 ffi::scaffold_rust_ffi(&project::current_project_name());
+            }
+            if let Some(t) = template {
+                templates::scaffold(&t, &project::current_project_name());
             }
         }
         "init" => project::init(),
