@@ -20,6 +20,23 @@ pub fn validate_template(name: &str) {
     }
 }
 
+/// Game engine integrations: a real C/C++ graphics library `cforge add`
+/// already knows how to install and pkg-config-link (verified end-to-end:
+/// installed via brew, resolved via pkg-config, and a program calling its
+/// real API — InitWindow/BeginDrawing/EndDrawing — compiled and linked
+/// clean). Only ever paired with `--template game`, which it swaps from a
+/// zero-dependency stdin loop to an actual windowed game loop. This is
+/// deliberately not "Unity/Godot/Unreal integration" — those are entire
+/// separate build systems and runtimes, not something a CMake wrapper
+/// could meaningfully drive; a linkable C/C++ library is what's real here.
+pub const ENGINES: &[&str] = &["raylib"];
+
+pub fn validate_engine(name: &str) {
+    if !ENGINES.contains(&name) {
+        crate::usage_error(&format!("unknown --engine '{name}' (expected: {})", ENGINES.join("|")));
+    }
+}
+
 const CLI_MAIN: &str = r#"#include "commands.hpp"
 #include <iostream>
 #include <vector>
@@ -173,12 +190,110 @@ void Game::run() {
 }
 "#;
 
+const RAYLIB_MAIN: &str = r#"#include "Engine.hpp"
+
+int main() {
+    Engine engine(640, 480, "cforge game (raylib)");
+    engine.run();
+    return 0;
+}
+"#;
+
+const RAYLIB_PLAYER_HPP: &str = r#"#pragma once
+
+// A single controllable actor: position plus raylib input/draw calls.
+// Kept independent of Engine's window/frame lifecycle so it could be
+// reused for an Enemy class, or unit-tested without a window at all.
+class Player {
+public:
+    Player(float x, float y);
+    void handleInput(float dt);
+    void draw() const;
+
+private:
+    float x_;
+    float y_;
+    static constexpr float kSpeed = 200.0f;  // pixels per second
+    static constexpr float kSize = 32.0f;
+};
+"#;
+
+const RAYLIB_PLAYER_CPP: &str = r#"#include "Player.hpp"
+#include "raylib.h"
+
+Player::Player(float x, float y) : x_(x), y_(y) {}
+
+void Player::handleInput(float dt) {
+    float delta = kSpeed * dt;
+    if (IsKeyDown(KEY_RIGHT)) x_ += delta;
+    if (IsKeyDown(KEY_LEFT)) x_ -= delta;
+    if (IsKeyDown(KEY_DOWN)) y_ += delta;
+    if (IsKeyDown(KEY_UP)) y_ -= delta;
+}
+
+void Player::draw() const {
+    DrawRectangle(static_cast<int>(x_ - kSize / 2), static_cast<int>(y_ - kSize / 2),
+                  static_cast<int>(kSize), static_cast<int>(kSize), MAROON);
+}
+"#;
+
+const RAYLIB_ENGINE_HPP: &str = r#"#pragma once
+#include "Player.hpp"
+
+// Thin wrapper around raylib's window/frame lifecycle (InitWindow /
+// BeginDrawing+EndDrawing / CloseWindow) so main.cpp and Player don't need
+// to touch raylib's C API directly. Swap the body of run() for a
+// different backend without touching Player at all — that's the point of
+// keeping them in separate files linked into one binary.
+class Engine {
+public:
+    Engine(int width, int height, const char* title);
+    ~Engine();
+    void run();
+
+private:
+    Player player_;
+};
+"#;
+
+const RAYLIB_ENGINE_CPP: &str = r#"#include "Engine.hpp"
+#include "raylib.h"
+
+Engine::Engine(int width, int height, const char* title) : player_(width / 2.0f, height / 2.0f) {
+    InitWindow(width, height, title);
+    SetTargetFPS(60);
+}
+
+Engine::~Engine() {
+    CloseWindow();
+}
+
+void Engine::run() {
+    while (!WindowShouldClose()) {
+        player_.handleInput(GetFrameTime());
+
+        BeginDrawing();
+        ClearBackground(RAYWHITE);
+        DrawText("Arrow keys to move, Esc to quit", 10, 10, 20, DARKGRAY);
+        player_.draw();
+        EndDrawing();
+    }
+}
+"#;
+
 /// Scaffolds `template` as a C++ app directory named after the project
 /// (`CPP/<project_name>/`) — matching `cargo new`'s convention that a
 /// fresh project's own name is also its main binary's name. Existing
 /// files are left untouched (same convention as `ffi.rs`'s scaffolding),
 /// so re-running this after hand-editing doesn't clobber changes.
-pub fn scaffold(template: &str, project_name: &str) {
+///
+/// `engine` only applies to the "game" template (checked by the caller via
+/// `validate_engine`/CLI parsing before this runs); when given, it both
+/// swaps in the engine-backed file set and installs+links the library
+/// through the exact same path `cforge add <lib>` uses — `--template game
+/// --engine raylib` needs raylib.h to actually resolve at compile time,
+/// not just have plausible-looking #include lines.
+pub fn scaffold(template: &str, project_name: &str, engine: Option<&str>) {
     let cfg = Config::load();
     let dir = Path::new(cfg.src_dir("cpp")).join(project_name);
     platform::create_dir_all(&dir).unwrap_or_else(|e| {
@@ -186,9 +301,19 @@ pub fn scaffold(template: &str, project_name: &str) {
         std::process::exit(1);
     });
 
-    let files: &[(&str, &str)] = match template {
-        "cli" => &[("main.cpp", CLI_MAIN), ("commands.hpp", CLI_COMMANDS_HPP), ("commands.cpp", CLI_COMMANDS_CPP)],
-        "game" => {
+    let files: &[(&str, &str)] = match (template, engine) {
+        ("cli", _) => &[("main.cpp", CLI_MAIN), ("commands.hpp", CLI_COMMANDS_HPP), ("commands.cpp", CLI_COMMANDS_CPP)],
+        ("game", Some("raylib")) => {
+            crate::build::add_library("raylib");
+            &[
+                ("main.cpp", RAYLIB_MAIN),
+                ("Engine.hpp", RAYLIB_ENGINE_HPP),
+                ("Engine.cpp", RAYLIB_ENGINE_CPP),
+                ("Player.hpp", RAYLIB_PLAYER_HPP),
+                ("Player.cpp", RAYLIB_PLAYER_CPP),
+            ]
+        }
+        ("game", _) => {
             &[("main.cpp", GAME_MAIN), ("Player.hpp", GAME_PLAYER_HPP), ("Player.cpp", GAME_PLAYER_CPP), ("Game.hpp", GAME_GAME_HPP), ("Game.cpp", GAME_GAME_CPP)]
         }
         _ => unreachable!("validate_template already rejected anything else"),
