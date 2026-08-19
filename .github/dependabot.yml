@@ -1,0 +1,11 @@
+version: 2
+
+updates:
+  # cforge has no third-party crates, so only the Actions used by ci.yml and
+  # release.yml need watching. Add a `cargo` entry here if that ever changes.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"

@@ -1,0 +1,15 @@
+[package]
+name = "cforge"
+version = "0.4.1"
+edition = "2021"
+
+[[bin]]
+name = "cforge"
+path = "src/main.rs"
+
+[dependencies]
+toml = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+
+[profile.release]
+opt-level = 2

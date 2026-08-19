@@ -1,0 +1,41 @@
+name: ci
+
+# Push only, deliberately. Checks are recorded against a commit, not an event,
+# so a PR picks up the run its head commit already got here -- adding a
+# pull_request trigger would put two check runs with the same name on one SHA,
+# and branch protection reads whichever it likes. No branch filter, so a PR
+# from any branch arrives with its checks already green.
+# Trade-off: PRs from forks get no CI, since their commits never land here.
+on:
+  push:
+
+# Superseded pushes to the same branch stop building. Safe here because each
+# push is its own SHA, so a cancelled run can never taint a later commit's
+# checks. main is exempt -- its runs back the required status checks.
+concurrency:
+  group: ci-${{ github.ref_name }}
+  cancel-in-progress: ${{ github.ref_name != 'main' }}
+
+# CI only ever reads the tree. Set explicitly so a change to the repo-wide
+# default workflow permissions can't silently hand this a writable token.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - run: cargo clippy --all-targets -- -D warnings
+
+      - run: cargo test
