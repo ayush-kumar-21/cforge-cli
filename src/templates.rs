@@ -260,6 +260,15 @@ const RAYLIB_ENGINE_CPP: &str = r#"#include "Engine.hpp"
 #include "raylib.h"
 
 Engine::Engine(int width, int height, const char* title) : player_(width / 2.0f, height / 2.0f) {
+    // macOS specifics: Apple deprecated OpenGL after 10.14 and caps it at
+    // 4.1 core, which raylib's default 3.3 core profile stays well under,
+    // so rendering itself isn't affected. What *does* bite on every Mac
+    // with a Retina display is window-vs-framebuffer size mismatch (a
+    // window that renders blurry, or half-sized, or has input coordinates
+    // off by the DPI scale) unless HighDPI is requested before the window
+    // is created. This flag is a no-op on Linux/Windows, so it's set
+    // unconditionally rather than #ifdef'd per platform.
+    SetConfigFlags(FLAG_WINDOW_HIGHDPI);
     InitWindow(width, height, title);
     SetTargetFPS(60);
 }
