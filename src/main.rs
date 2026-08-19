@@ -97,8 +97,7 @@ pub fn usage() -> ! {
     for line in [
         "cforge new myapp",
         "cforge new myapp --lang c cpp",
-        "cforge new mygame --template game",
-        "cforge new mygame --template game --engine raylib",
+        "cforge new mytool --template cli",
         "cforge init",
         "cforge info",
         "cforge build",
@@ -141,21 +140,17 @@ pub fn usage_error(msg: &str) -> ! {
 fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
     let text: Option<&str> = match (cmd, sub) {
         ("new", _) => Some(
-            "Usage: cforge new <name> [--lang <lang>...] [--ffi rust] [--template <name>] [--engine <name>]\n\n\
+            "Usage: cforge new <name> [--lang <lang>...] [--ffi rust] [--template <name>]\n\n\
              Scaffolds a new project directory: creates <name>/, writes CMakeLists.txt,\n\
              creates C/CPP/Obj_C/Obj_CPP/build directories, and enables the given\n\
              languages (default: all platform-supported languages).\n\n\
              Options:\n\
-             \x20\x20--lang <lang>...     Languages to enable (c|cpp|obj_c|obj_cpp)\n\
-             \x20\x20--ffi rust           Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  links against it — for Rust projects calling into C/C++.\n\
-             \x20\x20--template <name>   Scaffold a real multi-file starter program into\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>/ as one linked executable (cli|game).\n\
-             \x20\x20--engine <name>      Only with '--template game': swap the zero-dependency\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  stdin loop for a real windowed game loop backed by this\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  library (currently: raylib), auto-installed via the same\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  path as 'cforge add'.",
+             \x20\x20--lang <lang>...   Languages to enable (c|cpp|obj_c|obj_cpp)\n\
+             \x20\x20--ffi rust         Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  links against it — for Rust projects calling into C/C++.\n\
+             \x20\x20--template <name>  Scaffold a real multi-file starter program into\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>/ as one linked executable (cli).",
         ),
         ("init", _) => Some(
             "Usage: cforge init\n\n\
@@ -375,15 +370,8 @@ fn main() {
             let (langs, remaining) = split_lang_flag(args);
             let (ffi, remaining) = split_value_flag(&remaining, "--ffi");
             let (template, remaining) = split_value_flag(&remaining, "--template");
-            let (engine, remaining) = split_value_flag(&remaining, "--engine");
             if let Some(t) = &template {
                 templates::validate_template(t);
-            }
-            if let Some(e) = &engine {
-                templates::validate_engine(e);
-                if template.as_deref() != Some("game") {
-                    usage_error("--engine only applies to '--template game'");
-                }
             }
             let name = remaining.first().map(|s| s.as_str()).unwrap_or("");
             project::new_project(name, &langs);
@@ -396,7 +384,7 @@ fn main() {
                 ffi::scaffold_rust_ffi(&project::current_project_name());
             }
             if let Some(t) = template {
-                templates::scaffold(&t, &project::current_project_name(), engine.as_deref());
+                templates::scaffold(&t, &project::current_project_name());
             }
         }
         "init" => project::init(),
