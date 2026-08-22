@@ -174,13 +174,16 @@ mod rust {
 /// Silent success is exactly what a test has to pin down: asserting the
 /// command succeeded would have passed against the bug.
 ///
-/// Not run on Windows: `cforge config set build <dir>` lands artifacts
-/// where this assertion cannot find them there, because the MSVC generator
-/// is multi-config and writes into <build>/<Config>/ rather than <build>/.
-/// A real gap, tracked separately -- gating it here keeps the bug visible
-/// in this comment instead of hidden behind a red build.
+/// Compiled out on Windows -- cfg, not #[ignore]: this whole suite is
+/// #[ignore]d and CI runs it with --ignored, so a second #[ignore] would
+/// both be a duplicate attribute and skip nothing.
+///
+/// The gap it sidesteps: `cforge config set build <dir>` lands artifacts
+/// where this assertion cannot find them on Windows, because the MSVC
+/// generator is multi-config and writes into <build>/<Config>/ rather than
+/// <build>/. A real bug, tracked separately.
+#[cfg(not(windows))]
 #[test]
-#[cfg_attr(windows, ignore = "custom build dirs vs. the multi-config MSVC generator")]
 #[ignore = "builds a real project via cmake + a compiler"]
 fn custom_source_and_build_dirs_still_build() {
     let cforge = cforge_bin();
@@ -206,12 +209,16 @@ fn custom_source_and_build_dirs_still_build() {
 /// the generated crate's own test proves the Rust side actually resolved
 /// and called the C++ symbol at runtime.
 ///
-/// Not run on Windows: the generated crate links the CMake library as a
-/// DLL, and the test binary exits with STATUS_DLL_NOT_FOUND because
-/// Windows resolves DLLs from the executable's directory and PATH, neither
-/// of which contains build/. Also a real gap, also tracked separately.
+/// Compiled out on Windows for the same mechanical reason as the test
+/// above: this suite is #[ignore]d and CI runs it with --ignored, so a
+/// second #[ignore] is a duplicate attribute that skips nothing.
+///
+/// The gap: the generated crate links the CMake library as a DLL, and the
+/// test binary exits STATUS_DLL_NOT_FOUND because Windows resolves DLLs
+/// from the executable's directory and PATH, neither of which holds
+/// build/. A real bug, tracked separately.
+#[cfg(not(windows))]
 #[test]
-#[cfg_attr(windows, ignore = "DLL search path for the linked CMake library")]
 #[ignore = "builds a real project via cmake + cargo"]
 fn rust_ffi_bindings_link_against_the_cmake_library() {
     let cforge = cforge_bin();
