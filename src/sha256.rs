@@ -117,43 +117,66 @@ mod cross_check {
     use super::hex;
     use std::process::Command;
 
-    /// The tool to check against is chosen per platform to match the one
-    /// that actually produces that platform's published checksum in
-    /// release.yml: `shasum`/`sha256sum` on Unix, PowerShell's
-    /// `Get-FileHash` on Windows.
+    /// Extracts a 64-character hex digest from a tool's output.
     ///
-    /// Windows deliberately does *not* go through sha256sum. The runner
-    /// resolves it to an MSYS build whose path handling and text/binary
-    /// defaults are their own topic, and it is not what release.yml runs
-    /// there anyway — so checking against it tested a pairing that never
-    /// ships. `-b` on the Unix tools pins binary mode regardless.
+    /// Windows tools disagree on shape: Get-FileHash prints the bare
+    /// uppercase digest, while certutil wraps it in a header and footer and
+    /// has historically space-separated the bytes. Stripping whitespace per
+    /// line and looking for the 64-hex-char run handles every form without
+    /// a parser per tool.
+    fn extract_digest(stdout: &str) -> Option<String> {
+        stdout.lines().find_map(|line| {
+            let compact: String = line.chars().filter(|c| !c.is_whitespace()).collect();
+            let is_digest = compact.len() == 64 && compact.chars().all(|c| c.is_ascii_hexdigit());
+            is_digest.then(|| compact.to_lowercase())
+        })
+    }
+
+    /// The reference tool is chosen per platform to match the one that
+    /// actually produces that platform's published checksum in release.yml:
+    /// `sha256sum`/`shasum` on Unix, PowerShell's Get-FileHash on Windows.
+    ///
+    /// Windows deliberately avoids sha256sum: the runner resolves it to an
+    /// MSYS build that is not what release.yml runs there, so checking
+    /// against it tested a pairing that never ships. `pwsh` is tried before
+    /// `powershell` because the runners have PowerShell 7, and certutil is
+    /// the last resort -- it is present on every Windows install, so the
+    /// test cannot silently degrade into checking nothing.
     ///
     /// Returns the tool name alongside the digest so a failure says which
     /// one disagreed.
     fn system_sha256(path: &str) -> Option<(String, String)> {
         #[cfg(windows)]
-        let attempts: Vec<(&str, Vec<String>)> = vec![(
-            "powershell",
+        let attempts: Vec<(&str, Vec<String>)> = {
+            let ps = format!("(Get-FileHash -Algorithm SHA256 -LiteralPath '{path}').Hash");
             vec![
-                "-NoProfile".to_string(),
-                "-Command".to_string(),
-                format!("(Get-FileHash -Algorithm SHA256 -LiteralPath '{path}').Hash"),
-            ],
-        )];
+                ("pwsh", vec!["-NoProfile".into(), "-Command".into(), ps.clone()]),
+                ("powershell", vec!["-NoProfile".into(), "-Command".into(), ps]),
+                ("certutil", vec!["-hashfile".into(), path.to_string(), "SHA256".into()]),
+            ]
+        };
         #[cfg(not(windows))]
         let attempts: Vec<(&str, Vec<String>)> = vec![
-            ("sha256sum", vec!["-b".to_string(), path.to_string()]),
-            ("shasum", vec!["-a".to_string(), "256".to_string(), "-b".to_string(), path.to_string()]),
+            ("sha256sum", vec!["-b".into(), path.to_string()]),
+            ("shasum", vec!["-a".into(), "256".into(), "-b".into(), path.to_string()]),
         ];
 
         for (bin, args) in attempts {
-            if let Ok(out) = Command::new(bin).args(&args).output() {
-                if out.status.success() {
-                    let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    if let Some(digest) = stdout.split_whitespace().next() {
-                        return Some((bin.to_string(), digest.to_lowercase()));
-                    }
-                }
+            let Ok(out) = Command::new(bin).args(&args).output() else { continue };
+            if !out.status.success() {
+                continue;
+            }
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            // Unix tools print "<digest>  <file>", so the digest is the
+            // first token; extract_digest covers the Windows shapes.
+            let first_token = stdout.split_whitespace().next().unwrap_or("");
+            let digest = if first_token.len() == 64 && first_token.chars().all(|c| c.is_ascii_hexdigit()) {
+                Some(first_token.to_lowercase())
+            } else {
+                extract_digest(&stdout)
+            };
+            if let Some(d) = digest {
+                return Some((bin.to_string(), d));
             }
         }
         None

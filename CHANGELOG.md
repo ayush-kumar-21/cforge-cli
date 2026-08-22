@@ -2,6 +2,17 @@
 
 ## 0.2.0 — 2026-08-22
 
+**Fixed: the Objective-C `cli` template did not compile on Linux.** It used
+lightweight generics (`NSArray<NSString *> *`), which are a Clang extension —
+GNUstep on Linux goes through GCC's Objective-C frontend, which rejects them.
+The template uses plain `NSArray *` now.
+
+**Fixed: `cforge toolchain install obj_c` failed on Debian/Ubuntu.** It
+installed a fixed package list ending in `gnustep-base`, which does not exist
+there, and a missing package is fatal — so the documented way to set up
+Objective-C on Linux exited 1 partway through. Both the compiler and the
+GNUstep base library now try the known per-distro names in order.
+
 **Fixed: a pure-C project would not build on Linux without GNUstep.**
 The generated `CMakeLists.txt` listed `OBJC OBJCXX` in `project()` whenever
 the *platform* could support Objective-C, so CMake went looking for an

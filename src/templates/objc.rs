@@ -42,13 +42,17 @@ const CLI_COMMANDS_H: &str = r#"#pragma once
 // Runs the named command with the given arguments. Returns the process
 // exit code (0 on success, 1 for an unknown command). Add a new command
 // by extending kCommands in commands.m.
-int RunCommand(NSString *name, NSArray<NSString *> *args);
+//
+// Plain NSArray rather than NSArray<NSString *>: lightweight generics are
+// a Clang extension, and Objective-C on Linux goes through GNUstep with
+// GCC's frontend, which rejects them outright.
+int RunCommand(NSString *name, NSArray *args);
 "#;
 
 const CLI_COMMANDS_M: &str = r#"#import "commands.h"
 #include <string.h>
 
-typedef int (*CommandFn)(NSArray<NSString *> *args);
+typedef int (*CommandFn)(NSArray *args);
 
 typedef struct {
     const char *name;
@@ -56,13 +60,13 @@ typedef struct {
     CommandFn fn;
 } Command;
 
-static int CmdGreet(NSArray<NSString *> *args) {
+static int CmdGreet(NSArray *args) {
     NSString *who = args.count > 0 ? args[0] : @"world";
     NSLog(@"Hello, %@!", who);
     return 0;
 }
 
-static int CmdVersion(NSArray<NSString *> *args) {
+static int CmdVersion(NSArray *args) {
     (void)args;
     printf("0.1.0\n");
     return 0;
@@ -74,7 +78,7 @@ static const Command kCommands[] = {
 };
 static const NSUInteger kCommandCount = sizeof(kCommands) / sizeof(kCommands[0]);
 
-int RunCommand(NSString *name, NSArray<NSString *> *args) {
+int RunCommand(NSString *name, NSArray *args) {
     const char *cName = name.UTF8String;
     for (NSUInteger i = 0; i < kCommandCount; i++) {
         if (strcmp(cName, kCommands[i].name) == 0) {
