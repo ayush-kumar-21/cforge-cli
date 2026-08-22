@@ -1,0 +1,13 @@
+# Shell scripts must keep LF endings regardless of the checkout platform.
+# A CRLF install.sh fails with a "bad interpreter" error, and these are the
+# scripts users pipe straight into a shell.
+*.sh text eol=lf
+
+# PowerShell is fine either way, but pinning it keeps the CI encoding check
+# (PSScriptAnalyzer) reading the same bytes everywhere.
+*.ps1 text eol=crlf
+
+# Never normalize anything binary.
+*.png binary
+*.jpg binary
+*.ico binary

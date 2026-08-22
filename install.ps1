@@ -19,7 +19,7 @@ try {
     Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Asset" -OutFile $TmpBin
 
     # Fail closed: a checksum that can't be fetched is not "unverified but
-    # fine" — whoever can substitute the binary can also 404 the checksum.
+    # fine" - whoever can substitute the binary can also 404 the checksum.
     Write-Host "Verifying checksum..."
     try {
         $Expected = (Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Asset.sha256").Content

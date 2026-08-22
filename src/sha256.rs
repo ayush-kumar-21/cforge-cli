@@ -117,8 +117,15 @@ mod cross_check {
     use super::hex;
     use std::process::Command;
 
+    /// `-b` (binary mode) is not optional. The Windows runner resolves
+    /// `sha256sum` to the MSYS/Git-Bash build, which defaults to *text*
+    /// mode and silently folds CRLF to LF before hashing — and git checks
+    /// these files out with CRLF there. `std::fs::read` below sees the raw
+    /// bytes, so without `-b` the two disagree on every text file in the
+    /// repo, and the test fails on a difference that exists only in the
+    /// checker, never in the release binaries this guards.
     fn system_sha256(path: &str) -> Option<String> {
-        for (bin, args) in [("sha256sum", vec![path]), ("shasum", vec!["-a", "256", path])] {
+        for (bin, args) in [("sha256sum", vec!["-b", path]), ("shasum", vec!["-a", "256", "-b", path])] {
             if let Ok(out) = Command::new(bin).args(&args).output() {
                 if out.status.success() {
                     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
