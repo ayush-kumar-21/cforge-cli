@@ -477,7 +477,12 @@ Commit `CMakeLists.txt`, `langs.txt`, `libs.txt`, `deps.lock`, and
 
 All five templates exist for C, C++, Objective-C, and Objective-C++, each
 implemented in that language's own idioms rather than one language's template
-with a different file extension. Rust has its own equivalents through
+with a different file extension.
+
+> **Objective-C templates are macOS-only in practice.** They use Objective-C
+> 2.0 constructs such as `@autoreleasepool`, which GCC's Objective-C frontend
+> — what GNUstep on Linux compiles with — does not implement. Objective-C you
+> write yourself against that frontend still builds on Linux. Rust has its own equivalents through
 `new-rust-app`.
 
 | Template | Contents |
@@ -573,7 +578,7 @@ echo every command cforge runs underneath.
 | Wrong compiler being used | `cforge toolchain list`, then `cforge toolchain use <lang> <compiler>` |
 | A pinned standard is rejected | `cforge std list` shows what your compiler actually supports; `cforge std set <key> latest` |
 | Editor sees no include paths | `cforge compdb` |
-| Objective-C fails to build on Linux | Install the runtime: `cforge toolchain install obj_c`. ARC needs `--runtime libobjc2`, and Apple frameworks are unavailable |
+| Objective-C fails to build on Linux | Install the runtime: `cforge toolchain install obj_c`. ARC needs `--runtime libobjc2`, and Apple frameworks are unavailable. Note the scaffolded templates use Objective-C 2.0 and will not compile under GCC's Objective-C frontend — see [Platform notes](#platform-notes) |
 | `cforge test` finds no tests | Tests come from directories ending in `_test`. Check the directory name, then `cforge build` before `cforge test` |
 
 **Library name mismatches** are the most common failure. The name you pass to

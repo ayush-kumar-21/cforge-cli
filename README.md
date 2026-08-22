@@ -50,10 +50,13 @@ single-language (C by default); use `--lang` to enable more. There is also a
 `new-rust-app` shortcut that hands off to `cargo` — cforge does not build Rust
 projects, it just gets you started the same way.
 
-Objective-C and Objective-C++ are fully supported on macOS. On Linux they work
-through GNUstep, with caveats: no Apple frameworks, and ARC requires
-`--runtime libobjc2`. On Windows they are unavailable, since Objective-C needs
-either Apple's runtime or GNUstep and neither exists there.
+Objective-C and Objective-C++ are fully supported on macOS. On Linux they
+build through GNUstep with real caveats: no Apple frameworks, ARC requires
+`--runtime libobjc2`, and **the Objective-C starter templates do not compile
+there** — they use Objective-C 2.0 (`@autoreleasepool`), which GCC's
+Objective-C frontend does not implement. Hand-written Objective-C targeting
+that frontend builds fine. On Windows they are unavailable entirely, since
+Objective-C needs either Apple's runtime or GNUstep and neither exists there.
 
 ---
 

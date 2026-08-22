@@ -220,26 +220,6 @@ endif()
 # imply an Objective-C compiler the way macOS does: GNUstep is an explicit
 # install. A project that asked for obj_c on a machine that cannot build it
 # gets a warning naming the fix, not a CMake stack trace.
-# GCC's Objective-C frontend predates Objective-C 2.0: no
-# @autoreleasepool, no array subscripting, and .m compiled in C89 mode.
-# GNUstep itself is built and used with clang, so prefer clang for
-# Objective-C on Linux unless something has already been pinned (a
-# -DCMAKE_OBJC_COMPILER from `cforge toolchain use` wins).
-if(UNIX AND NOT APPLE)
-    if(NOT CMAKE_OBJC_COMPILER)
-        find_program(CFORGE_OBJC_CLANG clang)
-        if(CFORGE_OBJC_CLANG)
-            set(CMAKE_OBJC_COMPILER "${CFORGE_OBJC_CLANG}")
-        endif()
-    endif()
-    if(NOT CMAKE_OBJCXX_COMPILER)
-        find_program(CFORGE_OBJCXX_CLANG clang++)
-        if(CFORGE_OBJCXX_CLANG)
-            set(CMAKE_OBJCXX_COMPILER "${CFORGE_OBJCXX_CLANG}")
-        endif()
-    endif()
-endif()
-
 include(CheckLanguage)
 if("obj_c" IN_LIST ENABLED_LANGS)
     check_language(OBJC)
