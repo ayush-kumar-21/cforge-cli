@@ -55,7 +55,7 @@ jobs:
       # installs. Without them the objc/objcpp cases in the next step cannot
       # build anything, and the tier the README advertises goes untested.
       - if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y gobjc gnustep-devel
+        run: sudo apt-get update && sudo apt-get install -y gobjc gobjc++ gnustep-devel
 
       # tests/scaffold_and_build.rs: actually scaffolds *and builds* a real
       # project for every language/template combination via the compiled

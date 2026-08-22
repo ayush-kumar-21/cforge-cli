@@ -27,8 +27,9 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Usage: %s <command> [args...]\n", argv[0]);
             return 1;
         }
-        NSMutableArray<NSString *> *args = [NSMutableArray array];
-        for (int i = 2; i < argc; i++) {
+        NSMutableArray *args = [NSMutableArray array];
+        int i;
+        for (i = 2; i < argc; i++) {
             [args addObject:[NSString stringWithUTF8String:argv[i]]];
         }
         return RunCommand([NSString stringWithUTF8String:argv[1]], args);
@@ -61,7 +62,13 @@ typedef struct {
 } Command;
 
 static int CmdGreet(NSArray *args) {
-    NSString *who = args.count > 0 ? args[0] : @"world";
+    // [args objectAtIndex:] rather than args[0], and [args count] rather
+    // than args.count: subscripting and dot-syntax on a plain NSArray are
+    // Clang extensions, and Objective-C on Linux compiles through GCC.
+    NSString *who = @"world";
+    if ([args count] > 0) {
+        who = [args objectAtIndex:0];
+    }
     NSLog(@"Hello, %@!", who);
     return 0;
 }
@@ -79,14 +86,18 @@ static const Command kCommands[] = {
 static const NSUInteger kCommandCount = sizeof(kCommands) / sizeof(kCommands[0]);
 
 int RunCommand(NSString *name, NSArray *args) {
-    const char *cName = name.UTF8String;
-    for (NSUInteger i = 0; i < kCommandCount; i++) {
+    // Loop counters declared up front: GCC compiles .m files in C89 mode
+    // unless CMAKE_OBJC_STANDARD resolves to something newer, and it does
+    // not for every GCC/CMake pairing. Declaring here builds everywhere.
+    NSUInteger i;
+    const char *cName = [name UTF8String];
+    for (i = 0; i < kCommandCount; i++) {
         if (strcmp(cName, kCommands[i].name) == 0) {
             return kCommands[i].fn(args);
         }
     }
     fprintf(stderr, "Unknown command '%s'. Available commands:\n", cName);
-    for (NSUInteger i = 0; i < kCommandCount; i++) {
+    for (i = 0; i < kCommandCount; i++) {
         fprintf(stderr, "  %s - %s\n", kCommands[i].name, kCommands[i].description);
     }
     return 1;

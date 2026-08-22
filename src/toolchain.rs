@@ -179,15 +179,21 @@ fn install_objc_linux(runtime: &str) {
     ensure_pkg_manager();
     match runtime {
         "gnustep" => {
-            // Debian/Ubuntu: gobjc + gnustep-devel (which pulls in
-            // libgnustep-base-dev). Fedora: gcc-objc + gnustep-base-devel.
-            // Arch: gcc-objc + gnustep-base.
-            let compiler = install_first_available("Objective-C compiler", &["gobjc", "gcc-objc"]);
+            // Debian/Ubuntu: gobjc / gobjc++ + gnustep-devel (which pulls
+            // in libgnustep-base-dev). Fedora: gcc-objc / gcc-objc++ +
+            // gnustep-base-devel. Arch: gcc-objc + gnustep-base.
+            //
+            // Both compilers are installed regardless of which language was
+            // asked for: obj_c and obj_cpp both land here, and installing
+            // only gobjc left `toolchain install obj_cpp` reporting success
+            // while CMake still found no Objective-C++ compiler.
+            let objc = install_first_available("Objective-C compiler", &["gobjc", "gcc-objc"]);
+            let objcpp = install_first_available("Objective-C++ compiler", &["gobjc++", "gcc-objc++"]);
             let base = install_first_available(
                 "GNUstep base",
                 &["gnustep-devel", "gnustep-base-devel", "libgnustep-base-dev", "gnustep-base"],
             );
-            if !compiler || !base {
+            if !objc || !objcpp || !base {
                 std::process::exit(1);
             }
         }
