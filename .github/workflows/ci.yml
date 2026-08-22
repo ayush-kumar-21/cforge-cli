@@ -34,12 +34,94 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
-      - run: cargo clippy --all-targets -- -D warnings
+      # Formatting is settled by rustfmt.toml (which matches the style the
+      # code was already written in), so this stays a cheap gate rather
+      # than a source of churn. Ubuntu only — formatting is not
+      # platform-dependent and there is no reason to pay for it 3x.
+      - if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --check
 
-      # --test-threads=1: several tests sandbox themselves via
-      # std::env::set_current_dir, which is a process-global mutation, not
-      # per-thread. Running them in parallel (cargo test's default) races
-      # tests against each other's cwd and fails intermittently.
-      - run: cargo test -- --test-threads=1
+      - run: cargo clippy --all-targets --locked -- -D warnings
+
+      # Default (parallel) threads: the chdir-ing tests now serialize on a
+      # shared lock in platform::in_scratch_dir rather than relying on CI
+      # passing --test-threads=1, so this runs the same way it does locally.
+      - run: cargo test --locked
+
+      # tests/scaffold_and_build.rs: actually scaffolds *and builds* a real
+      # project for every language/template combination via the compiled
+      # cforge binary. The unit tests above never invoke cmake or a real
+      # compiler, so without this, a template that no longer compiles would
+      # still go green. #[ignore]'d in the test file (slow, needs a real
+      # toolchain) — run explicitly here instead. This is also what
+      # actually exercises the Windows (Winsock/clang-via-winget) and
+      # Linux/GNUstep code paths, which nothing else in CI touches.
+      - run: cargo test --locked --test scaffold_and_build -- --ignored --test-threads=1
+
+  # Two gates nothing above covers. Both are cheap and Ubuntu-only: neither
+  # is platform-dependent, so paying for them 3x in the matrix buys nothing.
+  audit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Known CVEs in the dependency tree (RustSec advisory DB). cforge is
+      # installed via `curl | sh` and replaces its own binary on update, so
+      # a vulnerable dependency is a supply-chain problem for every user,
+      # not just a build-time annoyance.
+      - run: cargo install cargo-audit --locked
+      - run: cargo audit --deny warnings
+
+  msrv:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to the rust-version in Cargo.toml. Without this, the floor is
+      # a claim in a manifest that nothing ever tests — it drifts upward the
+      # first time anyone uses a newer std API, and users on an older
+      # toolchain find out instead of CI.
+      - uses: dtolnay/rust-toolchain@1.85.0
+
+      - run: cargo check --all-targets --locked
+
+  # install.sh/uninstall.sh are the curl-pipe-to-shell surface and were the
+  # only executable code in the repo with no check at all. shellcheck ships
+  # on the Ubuntu runner; PSScriptAnalyzer runs on Windows for the
+  # PowerShell halves.
+  scripts:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      # --severity=warning: the remaining info-level notes are deliberate
+      # (SC2016 fires on the single-quoted PATH line, which must be written
+      # to the rc file literally rather than expanded at install time).
+      # install.sh is documented as 'curl ... | sh', so its shebang is
+      # bypassed and it must be POSIX-clean, not merely bash-clean — hence
+      # the explicit '-s sh' dialect for it. uninstall.sh runs via its own
+      # shebang and may use bash features.
+      - run: shellcheck -s sh --severity=warning install.sh
+      - run: shellcheck --severity=warning uninstall.sh
+
+  scripts-powershell:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $issues = Invoke-ScriptAnalyzer -Path . -Severity Error,Warning
+          if ($issues) { $issues | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }
+          Write-Host "PSScriptAnalyzer: no errors or warnings"

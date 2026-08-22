@@ -1,7 +1,22 @@
 [package]
 name = "cforge"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+# Verified with `cargo +1.85.0 check --all-targets --locked`. The floor is
+# set by zeroize 1.9 (via dialoguer), which declares 1.85; Cargo.lock is
+# also format v4, which needs 1.78+. Comfortably above the 1.77.2 that
+# fixed std::process::Command's Windows argument escaping (CVE-2024-24576),
+# which matters here because cforge passes library and target names
+# straight to winget/vcpkg on Windows.
+rust-version = "1.85"
+description = "Set up, build, and run C, C++, and Objective-C projects without hand-writing CMake"
+repository = "https://github.com/ayush-kumar-21/cforge-cli"
+homepage = "https://github.com/ayush-kumar-21/cforge-cli"
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+keywords = ["cmake", "build-tool", "cpp", "c", "cli"]
+categories = ["command-line-utilities", "development-tools::build-utils"]
+exclude = ["/.github", "/tests", "/install.sh", "/install.ps1", "/uninstall.sh", "/uninstall.ps1"]
 
 [[bin]]
 name = "cforge"
@@ -10,6 +25,7 @@ path = "src/main.rs"
 [dependencies]
 toml = "0.8"
 serde = { version = "1.0", features = ["derive"] }
+dialoguer = "0.12.0"
 
 [profile.release]
 opt-level = 2

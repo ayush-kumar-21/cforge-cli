@@ -6,10 +6,44 @@ on:
       - "v*.*.*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  # Gate. A tag push runs this workflow directly, so without it a release
+  # can be published from a commit that never went green — and, more likely,
+  # from a tag whose version disagrees with Cargo.toml, which ships a binary
+  # whose own `--version` is wrong.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Tag matches Cargo.toml version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          manifest="$(cargo metadata --no-deps --format-version 1 \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["packages"][0]["version"])')"
+          echo "tag=$tag manifest=$manifest"
+          if [ "$tag" != "$manifest" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $manifest"
+            exit 1
+          fi
+
+      - name: Changelog has an entry for this version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if ! grep -q "^## $version" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## $version' section"
+            exit 1
+          fi
+
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
   build:
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -28,6 +62,8 @@ jobs:
             asset: cforge-windows-x86_64.exe
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
 
@@ -35,7 +71,7 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - run: cargo build --release --target ${{ matrix.target }}
+      - run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Stage binary (Unix)
         if: runner.os != 'Windows'
@@ -45,6 +81,31 @@ jobs:
         if: runner.os == 'Windows'
         run: copy target\${{ matrix.target }}\release\cforge.exe ${{ matrix.asset }}
 
+      # `cforge self-update` fetches <asset>.sha256 next to the binary and
+      # refuses to install anything that doesn't match it. One file per
+      # asset rather than a single aggregate SHA256SUMS: these matrix jobs
+      # run in parallel on different runners, so an aggregate would need a
+      # join job to assemble, for no benefit to the one consumer.
+      #
+      # Only the bare hex digest is written — no filename column. The
+      # updater compares the whole trimmed file, and the two platforms'
+      # tools disagree on the second column's format.
+      - name: Checksum (Unix)
+        if: runner.os != 'Windows'
+        run: shasum -a 256 ${{ matrix.asset }} | cut -d' ' -f1 > ${{ matrix.asset }}.sha256
+
+      - name: Checksum (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          (Get-FileHash -Algorithm SHA256 '${{ matrix.asset }}').Hash.ToLower() |
+            Out-File -NoNewline -Encoding ascii '${{ matrix.asset }}.sha256'
+
       - uses: softprops/action-gh-release@v3
         with:
-          files: ${{ matrix.asset }}
+          # Every matrix job uploads to the same release; the first to
+          # arrive creates it and the rest attach their assets.
+          generate_release_notes: true
+          files: |
+            ${{ matrix.asset }}
+            ${{ matrix.asset }}.sha256
