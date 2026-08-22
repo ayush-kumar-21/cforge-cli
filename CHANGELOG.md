@@ -1,183 +1,84 @@
 # Changelog
 
-## Unreleased
+## 0.1.0 — 2026-08-22
 
-**Objective-C and Objective-C++ are now macOS-only.** The Linux tier, which
-built through GNUstep, is removed rather than kept as a documented caveat: it
-did not work. GNUstep on Linux compiles with GCC's Objective-C frontend, which
-predates Objective-C 2.0 and rejects `@autoreleasepool`, array subscripting,
-and dot-syntax — so the very templates `cforge new-objc-app` scaffolds could
-not be built there. Pointing CMake at clang instead fails differently, on
-GNUstep's headers being built against GCC's `libobjc`.
+First public release.
 
-`cforge new-objc-app` and `--lang obj_c` now exit with a clear message off
-macOS instead of producing a project that cannot build. C and C++ are
-unaffected and continue to build on all three platforms.
+cforge sets up, builds, and runs C, C++, Objective-C, and Objective-C++
+projects without you writing a `CMakeLists.txt` or remembering CMake's
+flags. It generates and drives an ordinary CMake project underneath, so
+anything that already works with CMake still works.
 
-Consequences:
+### Project setup
 
-- `cforge toolchain install obj_c` is macOS-only and installs Apple's Command
-  Line Tools. The `--runtime gnustep|libobjc2` flag is gone, along with the
-  `.cforge_objc_runtime` file it wrote.
-- The generated `CMakeLists.txt` no longer probes for `gnustep-config` or
-  links GNUstep's base library; Objective-C targets link Apple's Foundation.
-- `LangCapability` lost its `Caveats` tier, which nothing produces any more.
-- The Objective-C templates use idiomatic Objective-C 2.0 again — lightweight
-  generics, subscripting, dot-syntax — since no GCC frontend has to accept
-  them.
+- **`cforge new <name>`** scaffolds a project: `CMakeLists.txt`, the enabled
+  languages' source directories, and `build/`. Single-language (`c`) unless
+  `--lang` says otherwise.
+- **npm-create-style shortcuts** pick the language for you: `new-c-app`,
+  `new-cpp-app`, `new-objc-app`, `new-objcpp-app`, and `new-rust-app` (which
+  delegates to `cargo new` — cforge does not build Rust projects itself). An
+  arrow-key menu offers a starter template unless `--template` is given.
+- **`cforge init`** sets cforge up in a directory of existing sources.
+- **Five templates per language**, each written in that language's own
+  idioms rather than one language's template with a different file
+  extension: `cli`, `lib` (`--lib-type static|shared`), `header-lib`, `test`
+  (registered with CTest), and `server` (a TCP echo server).
+- **`cforge new --ffi rust`** scaffolds a C ABI boundary plus a Rust
+  `bindings/` crate that links against it.
 
-## 0.2.0 — 2026-08-22
+### Building
 
-**Known limitations**, all surfaced by running the integration tests on three
-platforms for the first time, and all pre-existing rather than new:
+- **No configure step.** `cforge build` configures on first use and reuses
+  it; `cforge run`, `cforge test`, `cforge clean`, `cforge install`, and
+  `cforge package` cover the rest of the loop.
+- **Targets are discovered, not registered.** A source file becomes an
+  executable; a directory of same-language sources becomes one executable
+  linked from all of them; a `.cforge_lib` marker makes it a library; a
+  `*_test` directory name registers it with CTest.
+- **Toolchains install themselves.** A package manager, a C/C++ compiler,
+  CMake, and Ninja on Windows are installed on demand the first time a
+  command needs one. `cforge doctor` diagnoses what is missing.
+- **Layout is configurable** through `.cforge.toml` (`cforge config set`),
+  and honored consistently by target resolution, `format`, `lint`, `clean`,
+  `install`, and `package`.
 
-- The Objective-C starter templates do not compile on Linux. They use
-  Objective-C 2.0 (`@autoreleasepool`), which GCC's Objective-C frontend does
-  not implement, and Debian's GNUstep links against GCC's `libobjc`, so
-  pointing CMake at clang instead fails on a missing `<objc/objc.h>`. Making
-  the tier work needs GNUstep with libobjc2 and matching `-fobjc-runtime`
-  flags. Hand-written Objective-C for the GCC frontend still builds.
+### Dependencies
+
+- **`cforge add <library>`** installs and links a library through the
+  platform's package manager — Homebrew, apt, dnf, pacman, zypper, or apk
+  plus pkg-config on Unix, vcpkg on Windows. Candidate package names are
+  tried in order rather than giving up on the first miss.
+- **`deps.lock`** records the name each library resolved to per platform, so
+  `cforge deps sync` reproduces an environment on a fresh checkout or in CI.
+
+### Platforms
+
+macOS, Linux, and Windows, as native binaries — no WSL, MSYS2, or bash
+required on Windows, which is the reason cforge is a compiled binary rather
+than the shell script it started as.
+
+**Objective-C and Objective-C++ require macOS.** They are Apple platform
+languages, and cforge rejects them up front elsewhere rather than
+half-working: GNUstep on Linux compiles with GCC's Objective-C frontend,
+which predates Objective-C 2.0 and cannot build the templates cforge
+scaffolds. C and C++ build everywhere.
+
+### Security
+
+Release binaries ship a `<asset>.sha256` generated on the same runner that
+built them. `install.sh`, `install.ps1`, and `cforge self-update` all verify
+it and are **fail-closed**: a mismatched checksum, or one that cannot be
+fetched at all, aborts and leaves any existing binary untouched. The SHA-256
+implementation is std-only and checked against the NIST FIPS 180-4 vectors
+in-tree. See [SECURITY.md](SECURITY.md).
+
+### Known limitations
+
 - `cforge config set build <dir>` does not locate artifacts on Windows: the
   MSVC generator is multi-config and writes to `<build>/<Config>/`.
 - `cforge new --ffi rust` produces a crate whose tests fail on Windows with
   `STATUS_DLL_NOT_FOUND`, because the linked CMake library is a DLL and
   `build/` is on neither the executable's directory nor PATH.
 
-The integration tests for these three are gated to the platforms where they
-pass, each with a comment stating what is actually broken.
-
-**Fixed: the Objective-C `cli` template did not compile on Linux.** It used
-lightweight generics (`NSArray<NSString *> *`), which are a Clang extension —
-GNUstep on Linux goes through GCC's Objective-C frontend, which rejects them.
-The template uses plain `NSArray *` now.
-
-**Fixed: `cforge toolchain install obj_c` failed on Debian/Ubuntu.** It
-installed a fixed package list ending in `gnustep-base`, which does not exist
-there, and a missing package is fatal — so the documented way to set up
-Objective-C on Linux exited 1 partway through. Both the compiler and the
-GNUstep base library now try the known per-distro names in order.
-
-**Fixed: a pure-C project would not build on Linux without GNUstep.**
-The generated `CMakeLists.txt` listed `OBJC OBJCXX` in `project()` whenever
-the *platform* could support Objective-C, so CMake went looking for an
-Objective-C compiler while configuring projects containing none. On macOS
-that is free; on a stock Linux box `gcc` cannot compile Objective-C without
-the `gobjc` package, and `cforge build` died with `cannot execute cc1obj`.
-Objective-C is now enabled by `enable_language` at configure time, gated on
-`langs.txt` and probed with `check_language` so a missing compiler produces
-a warning naming the fix rather than a failed configure. As a side effect,
-`cforge lang add obj_c` now takes effect without regenerating
-`CMakeLists.txt`.
-
-**Fixed: `cforge build` did nothing on a project with a custom layout.**
-`.cforge.toml` source paths were honored everywhere except target
-*resolution*, which hardcoded `C/`/`CPP/`/... — so a relocated source tree
-discovered no buildable targets and `cforge build` exited 0 having built
-nothing. `cforge format`/`lint` had the same blind spot, and additionally
-only ever scanned one directory level, skipping every multi-file app target.
-
-**Fixed: `paths.build` was settable but ignored.** `cforge config set build
-<dir>` was honored by `init` and `clean` while every other command
-hardcoded `build/`, so setting it produced a project whose artifacts landed
-where `package`/`install` couldn't find them. A configured build directory
-may now also be nested.
-
-**Fixed: `cforge new <name> --ffi rust` produced an unbuildable project.**
-The generated C ABI implementation is a `.cpp`, but without an explicit
-`--lang` the project was C-only, so the next `cforge build` failed with
-"No rule to make target". `--ffi rust` now enables `cpp` itself.
-
-**Fixed: re-running scaffolding overwrote hand-edited files.** The C ABI
-header, `bindings/Cargo.toml`, and `bindings/build.rs` were rewritten
-unconditionally — a second `--ffi rust` silently deleted every declaration
-the user had added to the header.
-
-**Fixed: `cforge lang remove` on the last language enabled all of them.**
-An empty `langs.txt` reads as "nothing pinned", which every consumer
-expands to all platform-supported languages, so removing the only language
-did the opposite of what was asked. It is now refused.
-
-**Fixed: `cforge std set` could report success and change nothing.**
-Setting a standard absent from `CMakeLists.txt` (e.g. `objc` on a project
-scaffolded on Windows) silently no-oped while printing "Pinned ...". The
-variable is now appended when missing.
-
-**Fixed: `cforge add <lib>` gave up after the first wrong package name.**
-Multi-candidate installs called a variant of `install_pkg` that exits the
-process on failure, making every candidate after the first unreachable.
-
-**Fixed: a hand-edited `.cforge.toml` left CMake on stale paths.**
-`.cforge_config.cmake` was only regenerated by `cforge config set`; it is
-now rewritten at configure time.
-
-**Security: releases are now checksum-verified, fail-closed.** `install.sh`,
-`install.ps1`, and `cforge update` all downloaded a release binary over the
-network and installed it with no integrity check beyond TLS — and the two
-installers wrote straight over the existing binary, so a failed download
-also destroyed a working install. `release.yml` now publishes a
-`<asset>.sha256` beside every binary, and all three paths verify it before
-installing: they download to a temp file, hash it, and abort on a mismatch
-*or* on a checksum that cannot be fetched at all, leaving any existing
-install untouched. Fail-open on a missing checksum was rejected as no
-protection at all — anyone able to substitute the binary can equally make
-the checksum request fail. SHA-256 is implemented in `src/sha256.rs` with
-std only (no new dependency), checked against the FIPS 180-4 vectors and
-cross-checked against the platform's own `sha256sum`/`shasum`. See
-[SECURITY.md](SECURITY.md) for what this does and does not cover.
-
-**Quality: the tree is `cargo fmt` clean and CI enforces it.** `rustfmt.toml`
-pins `max_width = 120` / `use_small_heuristics = "Max"`, chosen to match the
-style the code was already written in so adopting it was a formatting pass
-rather than a rewrite. The `KNOWN_MAPPINGS` library table carries
-`#[rustfmt::skip]` — it is read as rows, and the default formatting would
-expand ~50 one-line entries into ~300 lines.
-
-**Fixed: target resolution read the wrong project's config.**
-`resolve_target_in(base, name)` is documented as taking `base` so it never
-depends on the process working directory, but it consulted the *cwd's*
-`.cforge.toml` while resolving paths under `base`. It now loads `base`'s
-own config (`Config::load_from`). The two agreed for the only production
-caller, so this was latent rather than user-visible — but it silently
-undid the isolation the signature exists to provide.
-
-**Efficiency: `.cforge.toml` is no longer re-read once per build target.**
-Resolution rebuilt its directory table on every call, so a whole-project
-build read and TOML-parsed the config once per discovered target. Measured
-on a 12-target project: 15 reads before, 3 after, and now constant rather
-than growing with the target count.
-
-**Quality:** the chdir-based test helper is now shared and mutex-guarded —
-two copies were racing on process-global cwd and failing intermittently, so
-CI needed `--test-threads=1` to stay green. Four new integration tests
-cover the custom-layout, FFI-link, FFI-no-`--lang`, and no-clobber paths
-above; each was confirmed to fail against the bug it pins.
-
-**`cforge new` is single-language by default.** Omitting `--lang` now
-enables just `c`, not every platform-supported language — `--lang` is the
-only way to get more than one.
-
-**Five new commands, npm-create-style:** `new-c-app`, `new-cpp-app`,
-`new-objc-app`, `new-objcpp-app`, `new-rust-app`. The language is picked by
-which command you run; an arrow-key menu picks a starter template unless
-`--template` is given explicitly (falls back to no template, non-interactively,
-same as omitting `--template` on plain `cforge new`).
-
-**Every language gets its own native template implementation** — no more
-hardcoded C++: `cli`, `lib` (`--lib-type static|shared`), `header-lib`,
-`test` (CTest-registered), `server` (TCP echo). C uses plain C99, Objective-C
-and Objective-C++ use idiomatic Foundation (`NSString`/`NSLog`,
-`@autoreleasepool`, `@interface`/`@implementation`) while staying buildable
-on the existing Linux/GNUstep tier, and Rust (`new-rust-app`, a `cargo new`
-delegate — not a CMake project) uses clap/`#[inline]`/`#[cfg(test)]`/`std::net`.
-
-**`cmake.rs` gained two small, reusable primitives** the templates build on:
-a `.cforge_lib` marker file that turns an app directory into a real
-`add_library` target, and automatic `add_test` registration for any app
-directory named `*_test`. Both apply uniformly across all four CMake
-languages.
-
-**Quality:** added `tests/scaffold_and_build.rs` — integration tests that
-actually scaffold and build a real project for every language × template
-combination (30 total) via the compiled binary, wired into CI as a separate
-step. Previously this was verified by hand once per template; now it's
-regression-tested on every push, on all three platforms.
+The integration tests for both are scoped to the platforms where they pass,
+each with a comment naming the defect.
