@@ -2,6 +2,18 @@
 
 ## 0.2.0 — 2026-08-22
 
+**Fixed: a pure-C project would not build on Linux without GNUstep.**
+The generated `CMakeLists.txt` listed `OBJC OBJCXX` in `project()` whenever
+the *platform* could support Objective-C, so CMake went looking for an
+Objective-C compiler while configuring projects containing none. On macOS
+that is free; on a stock Linux box `gcc` cannot compile Objective-C without
+the `gobjc` package, and `cforge build` died with `cannot execute cc1obj`.
+Objective-C is now enabled by `enable_language` at configure time, gated on
+`langs.txt` and probed with `check_language` so a missing compiler produces
+a warning naming the fix rather than a failed configure. As a side effect,
+`cforge lang add obj_c` now takes effect without regenerating
+`CMakeLists.txt`.
+
 **Fixed: `cforge build` did nothing on a project with a custom layout.**
 `.cforge.toml` source paths were honored everywhere except target
 *resolution*, which hardcoded `C/`/`CPP/`/... — so a relocated source tree

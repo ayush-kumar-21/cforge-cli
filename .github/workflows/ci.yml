@@ -122,6 +122,10 @@ jobs:
       - shell: pwsh
         run: |
           Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
-          $issues = Invoke-ScriptAnalyzer -Path . -Severity Error,Warning
+          # PSAvoidUsingWriteHost is excluded on purpose: these are
+          # interactive installers whose entire job is printing progress to
+          # a human at a console. Write-Output would put that text on the
+          # pipeline instead, which is the thing to avoid here.
+          $issues = Invoke-ScriptAnalyzer -Path . -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost
           if ($issues) { $issues | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }
           Write-Host "PSScriptAnalyzer: no errors or warnings"

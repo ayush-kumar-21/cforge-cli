@@ -82,31 +82,32 @@ fn scaffold_and_cargo_build(template: &str) {
 }
 
 macro_rules! c_family_tests {
+    // The optional meta goes on the module, not on each fn. Gating the
+    // functions individually left `use super::scaffold_and_build` behind
+    // with nothing referencing it, which is an unused import -- and CI
+    // builds with -D warnings, so the Windows job failed on a lint in a
+    // test that was deliberately compiled out there.
     ($lang_mod:ident, $new_cmd:literal $(, #[$meta:meta])?) => {
+        $(#[$meta])?
         mod $lang_mod {
             use super::scaffold_and_build;
 
-            $(#[$meta])?
             #[test]
             #[ignore = "builds a real project via cmake + a compiler"]
             fn cli() { scaffold_and_build($new_cmd, "cli"); }
 
-            $(#[$meta])?
             #[test]
             #[ignore = "builds a real project via cmake + a compiler"]
             fn lib() { scaffold_and_build($new_cmd, "lib"); }
 
-            $(#[$meta])?
             #[test]
             #[ignore = "builds a real project via cmake + a compiler"]
             fn header_lib() { scaffold_and_build($new_cmd, "header-lib"); }
 
-            $(#[$meta])?
             #[test]
             #[ignore = "builds a real project via cmake + a compiler"]
             fn test_template() { scaffold_and_build($new_cmd, "test"); }
 
-            $(#[$meta])?
             #[test]
             #[ignore = "builds a real project via cmake + a compiler"]
             fn server() { scaffold_and_build($new_cmd, "server"); }

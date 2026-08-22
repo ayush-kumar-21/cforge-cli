@@ -210,6 +210,36 @@ else()
     set(ENABLED_LANGS c cpp obj_c obj_cpp)
 endif()
 
+# Objective-C is enabled here rather than in project() above, so a project
+# that does not use it never makes CMake look for a compiler that may not
+# exist. Listing OBJC in project() failed configure outright on any Linux
+# box without gobjc/GNUstep -- including for projects containing no
+# Objective-C at all, which is most of them.
+#
+# check_language probes instead of hard-failing, because "Linux" does not
+# imply an Objective-C compiler the way macOS does: GNUstep is an explicit
+# install. A project that asked for obj_c on a machine that cannot build it
+# gets a warning naming the fix, not a CMake stack trace.
+include(CheckLanguage)
+if("obj_c" IN_LIST ENABLED_LANGS)
+    check_language(OBJC)
+    if(CMAKE_OBJC_COMPILER)
+        enable_language(OBJC)
+    else()
+        message(WARNING "No Objective-C compiler found; skipping ${CFORGE_OBJ_C_SRC}/. Run 'cforge toolchain install obj_c'.")
+        list(REMOVE_ITEM ENABLED_LANGS "obj_c")
+    endif()
+endif()
+if("obj_cpp" IN_LIST ENABLED_LANGS)
+    check_language(OBJCXX)
+    if(CMAKE_OBJCXX_COMPILER)
+        enable_language(OBJCXX)
+    else()
+        message(WARNING "No Objective-C++ compiler found; skipping ${CFORGE_OBJ_CPP_SRC}/. Run 'cforge toolchain install obj_cpp'.")
+        list(REMOVE_ITEM ENABLED_LANGS "obj_cpp")
+    endif()
+endif()
+
 if("c" IN_LIST ENABLED_LANGS)
     file(GLOB C_FILES "${CFORGE_C_SRC}/*.c")
 endif()
@@ -422,17 +452,25 @@ pub fn generate_cforge_config() {
     crate::platform::write_file(Path::new(".cforge_config.cmake"), &content);
 }
 
-/// Builds the CMakeLists.txt content for a fresh project. OBJC/OBJCXX are
-/// only requested as project() languages on macOS and Linux (GNUstep): on
-/// Windows, CMake would hard-fail configuring even a pure-C project while
-/// hunting for an Objective-C compiler that doesn't exist there.
+/// Builds the CMakeLists.txt content for a fresh project.
+///
+/// project() requests only C and CXX. OBJC/OBJCXX used to be listed here
+/// whenever the *platform* could support them (macOS or Linux), which meant
+/// CMake went hunting for an Objective-C compiler while configuring a
+/// pure-C project. On macOS that is free — clang is one compiler — but on a
+/// stock Linux box gcc cannot compile Objective-C without the gobjc
+/// package, so `cforge build` died with "cannot execute cc1obj" on projects
+/// containing no Objective-C at all.
+///
+/// They are enabled by `enable_language` in BODY instead, gated on
+/// langs.txt. That is evaluated at configure time rather than baked in
+/// here, so `cforge lang add obj_c` on an existing project now takes effect
+/// without regenerating CMakeLists.txt.
 pub fn generate_cmakelists(project_name: &str) -> String {
     let objc_ok = crate::project::objc_capable_platform();
-    let proj_langs = if objc_ok { "C CXX OBJC OBJCXX" } else { "C CXX" };
 
-    let mut out = format!(
-        "cmake_minimum_required(VERSION 3.16)\nproject({project_name} VERSION 0.1.0 LANGUAGES {proj_langs})\n\n"
-    );
+    let mut out =
+        format!("cmake_minimum_required(VERSION 3.16)\nproject({project_name} VERSION 0.1.0 LANGUAGES C CXX)\n\n");
     out.push_str(HEADER_COMMON);
     if objc_ok {
         out.push_str(HEADER_OBJC);
