@@ -6,24 +6,40 @@ use std::path::Path;
 /// In-place replacement of a `set(VAR <value>)` line in CMakeLists.txt.
 /// Rust does this with plain string ops instead of shelling out to `sed`,
 /// which sidesteps the BSD-vs-GNU `sed -i` incompatibility entirely.
+///
+/// Appends the line when the variable isn't already present. Without that,
+/// this was a silent no-op on any CMakeLists.txt lacking the variable —
+/// e.g. a project scaffolded on Windows (whose header omits the OBJC/OBJCXX
+/// block entirely) then opened on macOS: `cforge std set objc 17` printed
+/// "Pinned CMAKE_OBJC_STANDARD=17" and changed nothing.
 pub fn set_cmake_var(path: &Path, var: &str, val: &str) {
     let content = fs::read_to_string(path).unwrap_or_else(|e| {
         eprintln!("Error: could not read {}: {e}", path.display());
         std::process::exit(1);
     });
+    crate::platform::write_file(path, &replace_cmake_var(&content, var, val));
+}
+
+/// Pure string half of `set_cmake_var`, so the replace-vs-append behaviour
+/// is testable without touching disk.
+fn replace_cmake_var(content: &str, var: &str, val: &str) -> String {
     let prefix = format!("set({var} ");
-    let new_content: String = content
+    let mut replaced = false;
+    let mut out: Vec<String> = content
         .lines()
         .map(|line| {
             if line.trim_start().starts_with(&prefix) {
+                replaced = true;
                 format!("set({var} {val})")
             } else {
                 line.to_string()
             }
         })
-        .collect::<Vec<_>>()
-        .join("\n");
-    crate::platform::write_file(path, &(new_content + "\n"));
+        .collect();
+    if !replaced {
+        out.push(format!("set({var} {val})"));
+    }
+    out.join("\n") + "\n"
 }
 
 /// Pure string parse so this is testable without touching disk.
@@ -102,7 +118,8 @@ pub fn set_c_std(cmake_file: &Path, val: &str) {
 }
 
 pub fn set_cxx_std(cmake_file: &Path, val: &str) {
-    let resolved = resolve_std(val, latest_cxx_std, "C++", |v| probe_std(cxx_compiler(), &format!("-std=c++{v}"), "c++"));
+    let resolved =
+        resolve_std(val, latest_cxx_std, "C++", |v| probe_std(cxx_compiler(), &format!("-std=c++{v}"), "c++"));
     set_cmake_var(cmake_file, "CMAKE_CXX_STANDARD", &resolved);
     crate::platform::status(&format!("Pinned CMAKE_CXX_STANDARD={resolved} in CMakeLists.txt"));
 }
@@ -112,7 +129,9 @@ pub fn set_objc_std(cmake_file: &Path, val: &str) {
         eprintln!("Error: Objective-C is not supported on this platform (no viable toolchain).");
         std::process::exit(3);
     }
-    let resolved = resolve_std(val, latest_objc_std, "Objective-C", |v| probe_std(c_compiler(), &format!("-std=c{v}"), "objective-c"));
+    let resolved = resolve_std(val, latest_objc_std, "Objective-C", |v| {
+        probe_std(c_compiler(), &format!("-std=c{v}"), "objective-c")
+    });
     set_cmake_var(cmake_file, "CMAKE_OBJC_STANDARD", &resolved);
     crate::platform::status(&format!("Pinned CMAKE_OBJC_STANDARD={resolved} in CMakeLists.txt"));
 }
@@ -122,7 +141,9 @@ pub fn set_objcxx_std(cmake_file: &Path, val: &str) {
         eprintln!("Error: Objective-C++ is not supported on this platform (no viable toolchain).");
         std::process::exit(3);
     }
-    let resolved = resolve_std(val, latest_objcxx_std, "Objective-C++", |v| probe_std(cxx_compiler(), &format!("-std=c++{v}"), "objective-c++"));
+    let resolved = resolve_std(val, latest_objcxx_std, "Objective-C++", |v| {
+        probe_std(cxx_compiler(), &format!("-std=c++{v}"), "objective-c++")
+    });
     set_cmake_var(cmake_file, "CMAKE_OBJCXX_STANDARD", &resolved);
     crate::platform::status(&format!("Pinned CMAKE_OBJCXX_STANDARD={resolved} in CMakeLists.txt"));
 }
@@ -226,8 +247,14 @@ if(EXTRA_LIBS)
 endif()
 
 # Shared by add_lang_executables (one file -> one executable) and
-# add_lang_apps (one directory of files -> one executable) below.
+# add_lang_apps (one directory of files -> one executable/library) below.
 function(link_extra_libs exec_name needs_foundation)
+    if(WIN32)
+        # Winsock, needed by the `--template server` starter (BSD-socket
+        # calls under WSAStartup). Always present in the Windows SDK/MinGW,
+        # so linking it into every target is harmless for the rest.
+        target_link_libraries(${exec_name} ws2_32)
+    endif()
     if(needs_foundation)
         if(APPLE)
             target_link_libraries(${exec_name} "-framework Foundation")
@@ -274,6 +301,14 @@ endfunction()
 # for programs that need more than one source file linked together (a
 # game's main.cpp + Player.cpp + Renderer.cpp as one binary, not three
 # separate, unlinked ones).
+#
+# Two directory conventions, both used by `cforge new --template`, change
+# what gets built instead of an executable:
+#  - a ".cforge_lib" marker file inside the directory (content: STATIC or
+#    SHARED) makes it a library instead (`--template lib`);
+#  - a directory name ending in "_test" is additionally registered with
+#    CTest via add_test (`--template test`) — ctest is already enabled by
+#    `enable_testing()` above.
 function(add_lang_apps src_dir ext needs_foundation)
     # IS_DIRECTORY/EXISTS in if() only have well-defined behavior with an
     # absolute path — src_dir arrives as the relative "CPP"/"C"/etc., which
@@ -287,13 +322,25 @@ function(add_lang_apps src_dir ext needs_foundation)
         if(IS_DIRECTORY "${abs_dir}/${app_name}")
             file(GLOB app_sources "${abs_dir}/${app_name}/*.${ext}")
             if(app_sources)
-                add_executable(${app_name} ${app_sources})
-                link_extra_libs(${app_name} ${needs_foundation})
-                list(APPEND ALL_EXEC_TARGETS ${app_name})
+                if(EXISTS "${abs_dir}/${app_name}/.cforge_lib")
+                    file(READ "${abs_dir}/${app_name}/.cforge_lib" lib_kind)
+                    string(STRIP "${lib_kind}" lib_kind)
+                    add_library(${app_name} ${lib_kind} ${app_sources})
+                    link_extra_libs(${app_name} ${needs_foundation})
+                    list(APPEND ALL_LIB_TARGETS ${app_name})
+                else()
+                    add_executable(${app_name} ${app_sources})
+                    link_extra_libs(${app_name} ${needs_foundation})
+                    if(${app_name} MATCHES "_test$")
+                        add_test(NAME ${app_name} COMMAND ${app_name})
+                    endif()
+                    list(APPEND ALL_EXEC_TARGETS ${app_name})
+                endif()
             endif()
         endif()
     endforeach()
     set(ALL_EXEC_TARGETS ${ALL_EXEC_TARGETS} PARENT_SCOPE)
+    set(ALL_LIB_TARGETS ${ALL_LIB_TARGETS} PARENT_SCOPE)
 endfunction()
 
 add_lang_executables("${C_FILES}" c FALSE)
@@ -336,6 +383,14 @@ if(ALL_EXEC_TARGETS)
 endif()
 if(ALL_FFI_LIB_TARGETS)
     install(TARGETS ${ALL_FFI_LIB_TARGETS}
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib)
+endif()
+# `--template lib` targets (add_lang_apps' .cforge_lib marker), separate
+# from the FFI shared libraries above since those are always SHARED.
+if(ALL_LIB_TARGETS)
+    install(TARGETS ${ALL_LIB_TARGETS}
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)
@@ -401,5 +456,40 @@ mod tests {
     fn missing_var_is_none() {
         let content = "set(CMAKE_CXX_STANDARD 20)\n";
         assert_eq!(parse_cmake_var(content, "CMAKE_OBJC_STANDARD"), None);
+    }
+
+    #[test]
+    fn replacing_an_existing_var_edits_it_in_place() {
+        let content = "set(CMAKE_CXX_STANDARD 20)\nset(CMAKE_C_STANDARD 17)\n";
+        let out = replace_cmake_var(content, "CMAKE_C_STANDARD", "23");
+        assert_eq!(parse_cmake_var(&out, "CMAKE_C_STANDARD"), Some("23".to_string()));
+        // untouched, and not duplicated
+        assert_eq!(parse_cmake_var(&out, "CMAKE_CXX_STANDARD"), Some("20".to_string()));
+        assert_eq!(out.matches("set(CMAKE_C_STANDARD").count(), 1);
+    }
+
+    /// A CMakeLists.txt scaffolded on Windows has no OBJC block at all;
+    /// setting the standard there used to report success and write nothing.
+    #[test]
+    fn setting_an_absent_var_appends_it() {
+        let content = "set(CMAKE_CXX_STANDARD 20)\n";
+        let out = replace_cmake_var(content, "CMAKE_OBJC_STANDARD", "17");
+        assert_eq!(parse_cmake_var(&out, "CMAKE_OBJC_STANDARD"), Some("17".to_string()));
+        assert_eq!(parse_cmake_var(&out, "CMAKE_CXX_STANDARD"), Some("20".to_string()));
+    }
+
+    /// Locks in the CMake-generation support the `--template lib`/`test`/
+    /// `server` templates depend on: a `.cforge_lib` marker builds a
+    /// library instead of an executable, a `*_test` app dir is registered
+    /// with `add_test`, and ws2_32 is linked on Windows for the socket
+    /// code in `--template server`.
+    #[test]
+    fn generated_cmakelists_supports_lib_test_and_server_templates() {
+        let out = generate_cmakelists("demo");
+        assert!(out.contains(".cforge_lib"));
+        assert!(out.contains("add_library(${app_name} ${lib_kind}"));
+        assert!(out.contains("add_test(NAME ${app_name} COMMAND ${app_name})"));
+        assert!(out.contains("ws2_32"));
+        assert!(out.contains("ALL_LIB_TARGETS"));
     }
 }

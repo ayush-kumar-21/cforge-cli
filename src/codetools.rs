@@ -1,39 +1,61 @@
 //! `cforge format`/`lint`/`compdb`: thin wrappers around clang-format,
 //! clang-tidy, and `cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON`.
+use crate::config::Config;
 use crate::platform::{self, command_exists, ensure_cmake, install_pkg};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const SOURCE_DIRS: &[&str] = &["C", "CPP", "Obj_C", "Obj_CPP"];
 const SOURCE_EXTS: &[&str] = &["c", "cpp", "m", "mm", "h", "hpp"];
 
-fn collect_source_files(paths: &[String]) -> Vec<PathBuf> {
-    let roots: Vec<PathBuf> = if paths.is_empty() {
-        SOURCE_DIRS.iter().map(PathBuf::from).collect()
-    } else {
-        paths.iter().map(PathBuf::from).collect()
-    };
+/// Default roots when no paths are given: the configured source
+/// directories plus the header directory. Reading `.cforge.toml` rather
+/// than hardcoding `C`/`CPP`/... means `cforge format` on a project with a
+/// custom layout formats its files instead of silently finding none.
+fn default_roots() -> Vec<PathBuf> {
+    let cfg = Config::load();
+    ["c", "cpp", "obj_c", "obj_cpp"]
+        .iter()
+        .map(|l| PathBuf::from(cfg.src_dir(l)))
+        .chain(std::iter::once(PathBuf::from(&cfg.paths.headers)))
+        .collect()
+}
 
-    let mut files = Vec::new();
-    for root in roots {
-        if root.is_file() {
-            files.push(root);
-            continue;
-        }
-        let Ok(entries) = fs::read_dir(&root) else { continue };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()).map(|e| SOURCE_EXTS.contains(&e)).unwrap_or(false) {
-                files.push(path);
-            }
+/// Recursive: app-style targets keep their sources in a subdirectory of
+/// the language dir (`CPP/mygame/*.cpp`, see cmake.rs's `add_lang_apps`),
+/// and a single-level `read_dir` skipped every one of them — `cforge
+/// format` quietly formatted only the standalone single-file targets.
+fn collect_into(root: &Path, files: &mut Vec<PathBuf>) {
+    if root.is_file() {
+        files.push(root.to_path_buf());
+        return;
+    }
+    let Ok(entries) = fs::read_dir(root) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_into(&path, files);
+        } else if path.extension().and_then(|e| e.to_str()).is_some_and(|e| SOURCE_EXTS.contains(&e)) {
+            files.push(path);
         }
     }
+}
+
+fn collect_source_files(paths: &[String]) -> Vec<PathBuf> {
+    let roots: Vec<PathBuf> =
+        if paths.is_empty() { default_roots() } else { paths.iter().map(PathBuf::from).collect() };
+
+    let mut files = Vec::new();
+    for root in &roots {
+        collect_into(root, &mut files);
+    }
+    files.sort();
+    files.dedup();
     files
 }
 
 pub fn compdb() {
     ensure_cmake();
-    let build_dir = Path::new("build");
+    let build_dir = &std::path::PathBuf::from(Config::load().build_dir());
     platform::create_dir_all(build_dir).ok();
     platform::run_or_die_in(
         build_dir,

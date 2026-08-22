@@ -16,12 +16,7 @@ const TOOLCHAIN_FILE: &str = "toolchain.txt";
 
 pub fn read_toolchain_file() -> Vec<(String, String)> {
     fs::read_to_string(TOOLCHAIN_FILE)
-        .map(|s| {
-            s.lines()
-                .filter_map(|l| l.split_once('='))
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect()
-        })
+        .map(|s| s.lines().filter_map(|l| l.split_once('=')).map(|(k, v)| (k.to_string(), v.to_string())).collect())
         .unwrap_or_default()
 }
 
@@ -210,7 +205,9 @@ fn install_native(lang: &str, compiler: Option<&str>, version: Option<&str>) {
                 std::process::exit(1);
             }
         },
-        "msvc" | "apple-clang" => platform::status(&format!("{compiler} ships with the platform toolchain; nothing to install.")),
+        "msvc" | "apple-clang" => {
+            platform::status(&format!("{compiler} ships with the platform toolchain; nothing to install."))
+        }
         other => crate::usage_error(&format!("unknown --compiler '{other}'")),
     }
 
@@ -310,22 +307,10 @@ pub fn remove(compiler: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-
-    fn in_scratch_dir<T>(label: &str, f: impl FnOnce() -> T) -> T {
-        let dir = std::env::temp_dir().join(format!("cforge_test_toolchain_{label}_{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&dir).unwrap();
-        let result = f();
-        std::env::set_current_dir(original).unwrap();
-        fs::remove_dir_all(&dir).ok();
-        result
-    }
 
     #[test]
     fn compiler_for_reads_back_use_compiler() {
-        in_scratch_dir("use", || {
+        crate::platform::in_scratch_dir("use", || {
             use_compiler("c", "gcc");
             assert_eq!(compiler_for("c"), Some("gcc".to_string()));
             assert_eq!(compiler_for("cpp"), None);
@@ -334,7 +319,7 @@ mod tests {
 
     #[test]
     fn use_compiler_replaces_existing_entry_for_same_lang() {
-        in_scratch_dir("replace", || {
+        crate::platform::in_scratch_dir("replace", || {
             use_compiler("c", "gcc");
             use_compiler("c", "clang");
             let entries = read_toolchain_file();

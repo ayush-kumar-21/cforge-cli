@@ -22,10 +22,8 @@ pub fn validate_ffi_target(target: &str) {
 /// hyphens aren't valid — so this picks the stricter identifier rule for
 /// both, rather than tracking two different sanitized forms.
 fn rust_ident(project_name: &str) -> String {
-    let mut out: String = project_name
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
-        .collect();
+    let mut out: String =
+        project_name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' }).collect();
     if out.is_empty() || out.chars().next().unwrap().is_ascii_digit() {
         out = format!("_{out}");
     }
@@ -37,12 +35,21 @@ fn rust_ident(project_name: &str) -> String {
 /// Called after `project::init()` / `lang_add()` have already set up the
 /// normal cforge project, so this only adds the FFI-specific pieces.
 pub fn scaffold_rust_ffi(project_name: &str) {
+    // The C ABI implementation this writes is a .cpp, so the project must
+    // have cpp enabled — same reason templates::scaffold calls lang_add
+    // for the language it is about to write files for. Without this,
+    // `cforge new foo --ffi rust` (no --lang, so langs.txt is "c" only)
+    // produced a project whose very next `cforge build` died with
+    // "No rule to make target 'foo'": CMakeLists never registered the
+    // target, but build.rs still asked for it.
+    crate::project::lang_add(&["cpp".to_string()]);
+
     let ident = rust_ident(project_name);
     let cfg = Config::load();
 
     scaffold_c_abi_header(&ident, &cfg);
     scaffold_cpp_impl(&ident, &cfg);
-    scaffold_rust_crate(project_name, &ident);
+    scaffold_rust_crate(project_name, &ident, &cfg);
 
     platform::status("Scaffolded Rust FFI bindings in bindings/ — see bindings/src/lib.rs");
     platform::status("Build the C/C++ side first ('cforge build'), then 'cd bindings && cargo build'.");
@@ -77,8 +84,7 @@ fn scaffold_c_abi_header(ident: &str, cfg: &Config) {
          \n\
          #endif /* {guard} */\n"
     );
-    let path = header_dir.join(format!("{ident}_ffi.h"));
-    platform::write_file(&path, &content);
+    platform::write_new(&header_dir.join(format!("{ident}_ffi.h")), &content);
 }
 
 fn scaffold_cpp_impl(ident: &str, cfg: &Config) {
@@ -99,13 +105,10 @@ fn scaffold_cpp_impl(ident: &str, cfg: &Config) {
          \x20\x20\x20\x20return a + b;\n\
          }}\n"
     );
-    let path = cpp_dir.join(format!("{ident}_ffi.cpp"));
-    if !path.exists() {
-        platform::write_file(&path, &content);
-    }
+    platform::write_new(&cpp_dir.join(format!("{ident}_ffi.cpp")), &content);
 }
 
-fn scaffold_rust_crate(project_name: &str, ident: &str) {
+fn scaffold_rust_crate(project_name: &str, ident: &str, cfg: &Config) {
     let bindings_dir = Path::new("bindings");
     let src_dir = bindings_dir.join("src");
     platform::create_dir_all(&src_dir).unwrap_or_else(|e| {
@@ -125,7 +128,7 @@ fn scaffold_rust_crate(project_name: &str, ident: &str) {
          \n\
          [dependencies]\n"
     );
-    platform::write_file(&bindings_dir.join("Cargo.toml"), &cargo_toml);
+    platform::write_new(&bindings_dir.join("Cargo.toml"), &cargo_toml);
 
     // build.rs links against the CMake build output. This assumes the
     // C/C++ side was already built via `cforge build` (build/ contains
@@ -145,23 +148,25 @@ fn scaffold_rust_crate(project_name: &str, ident: &str) {
     // cargo invocation's working directory. This is skipped on Windows,
     // which resolves DLLs via PATH/same-directory instead of rpath, and
     // where `-Wl,-rpath` isn't a link.exe flag.
+    let build_dir = cfg.build_dir();
+    let headers_dir = &cfg.paths.headers;
     let build_rs = format!(
         "fn main() {{\n\
-         \x20\x20\x20\x20// Assumes 'cforge build' has already produced build/ with\n\
+         \x20\x20\x20\x20// Assumes 'cforge build' has already produced {build_dir}/ with\n\
          \x20\x20\x20\x20// lib{ident}.so / lib{ident}.dylib / {ident}.dll. Adjust the search\n\
          \x20\x20\x20\x20// path if your CMake output directory differs.\n\
          \x20\x20\x20\x20let manifest_dir = std::env::var(\"CARGO_MANIFEST_DIR\").unwrap();\n\
-         \x20\x20\x20\x20let lib_dir = std::path::Path::new(&manifest_dir).join(\"..\").join(\"build\");\n\
+         \x20\x20\x20\x20let lib_dir = std::path::Path::new(&manifest_dir).join(\"..\").join(\"{build_dir}\");\n\
          \x20\x20\x20\x20println!(\"cargo:rustc-link-search=native={{}}\", lib_dir.display());\n\
          \x20\x20\x20\x20println!(\"cargo:rustc-link-lib=dylib={ident}\");\n\
          \x20\x20\x20\x20if std::env::var(\"CARGO_CFG_TARGET_OS\").as_deref() != Ok(\"windows\") {{\n\
          \x20\x20\x20\x20\x20\x20\x20\x20println!(\"cargo:rustc-link-arg=-Wl,-rpath,{{}}\", lib_dir.display());\n\
          \x20\x20\x20\x20}}\n\
-         \x20\x20\x20\x20println!(\"cargo:rerun-if-changed=../include/{ident}_ffi.h\");\n\
-         \x20\x20\x20\x20println!(\"cargo:rerun-if-changed=../build\");\n\
+         \x20\x20\x20\x20println!(\"cargo:rerun-if-changed=../{headers_dir}/{ident}_ffi.h\");\n\
+         \x20\x20\x20\x20println!(\"cargo:rerun-if-changed=../{build_dir}\");\n\
          }}\n"
     );
-    platform::write_file(&bindings_dir.join("build.rs"), &build_rs);
+    platform::write_new(&bindings_dir.join("build.rs"), &build_rs);
 
     let lib_rs = format!(
         "//! Raw FFI declarations for the C ABI in `include/{ident}_ffi.h`,\n\
@@ -194,10 +199,7 @@ fn scaffold_rust_crate(project_name: &str, ident: &str) {
          \x20\x20\x20\x20}}\n\
          }}\n"
     );
-    let lib_path = src_dir.join("lib.rs");
-    if !lib_path.exists() {
-        platform::write_file(&lib_path, &lib_rs);
-    }
+    platform::write_new(&src_dir.join("lib.rs"), &lib_rs);
 }
 
 #[cfg(test)]

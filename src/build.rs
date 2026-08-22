@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::platform::{
-    self, command_exists, ensure_cmake, ensure_ninja, ensure_pkg_manager, ensure_vcpkg,
-    install_pkg, os, vcpkg_exe, vcpkg_root, vcpkg_toolchain_file, vcpkg_triplet, Os, PkgManager,
+    self, command_exists, ensure_cmake, ensure_ninja, ensure_pkg_manager, ensure_vcpkg, install_pkg, os, vcpkg_exe,
+    vcpkg_root, vcpkg_toolchain_file, vcpkg_triplet, Os, PkgManager,
 };
 use std::fs;
 use std::path::Path;
@@ -18,6 +18,9 @@ pub struct TargetFile {
     pub is_app: bool,
 }
 
+/// (source directory, file extension, target-name suffix) per language.
+type LangDirs = Vec<(String, &'static str, &'static str)>;
+
 #[derive(Debug)]
 pub enum ResolvedTarget {
     Found(TargetFile),
@@ -26,13 +29,32 @@ pub enum ResolvedTarget {
 }
 
 /// Per-language (directory, file extension, target-name suffix) triples,
-/// used by both file and app-directory resolution below.
-fn lang_dirs() -> Vec<(&'static str, &'static str, &'static str)> {
+/// used by file resolution, app-directory resolution, and whole-project
+/// discovery below.
+///
+/// Directories come from `.cforge.toml`, not the `C`/`CPP`/... defaults:
+/// every other consumer of a source path (template scaffolding, the
+/// generated CMakeLists, `cforge info`) already honors the config, so
+/// hardcoding them here meant a project with a custom layout discovered
+/// its targets via the configured paths and then failed to resolve a
+/// single one — `cforge build` built nothing and said nothing.
+fn lang_dirs() -> LangDirs {
+    lang_dirs_in(Path::new("."))
+}
+
+/// The `.cforge.toml` consulted is `base`'s, not the process working
+/// directory's. `resolve_target_in` exists precisely so a caller can name
+/// its own root; reading config from cwd while resolving paths under
+/// `base` is how a function documented as cwd-independent quietly stops
+/// being cwd-independent.
+fn lang_dirs_in(base: &Path) -> LangDirs {
+    let cfg = Config::load_from(base);
+    let mut dirs = vec![(cfg.src_dir("c").to_string(), "c", "c"), (cfg.src_dir("cpp").to_string(), "cpp", "cpp")];
     if crate::project::objc_capable_platform() {
-        vec![("C", "c", "c"), ("CPP", "cpp", "cpp"), ("Obj_C", "m", "objc"), ("Obj_CPP", "mm", "objcpp")]
-    } else {
-        vec![("C", "c", "c"), ("CPP", "cpp", "cpp")]
+        dirs.push((cfg.src_dir("obj_c").to_string(), "m", "objc"));
+        dirs.push((cfg.src_dir("obj_cpp").to_string(), "mm", "objcpp"));
     }
+    dirs
 }
 
 fn dir_contains_ext(dir: &Path, ext: &str) -> bool {
@@ -57,18 +79,20 @@ fn dir_contains_ext(dir: &Path, ext: &str) -> bool {
 /// `CPP/creditCard.cpp`), since the bare name is genuinely ambiguous
 /// between them.
 pub fn resolve_target_in(base: &Path, name: &str) -> ResolvedTarget {
+    resolve_with(base, &lang_dirs_in(base), name)
+}
+
+/// Resolution against an already-computed `dirs`. `discover_all_targets`
+/// resolves every name it discovers, and rebuilding `dirs` inside each
+/// call re-read and re-parsed `.cforge.toml` once per target — for a value
+/// that cannot change mid-scan.
+fn resolve_with(base: &Path, dirs: &LangDirs, name: &str) -> ResolvedTarget {
     let name_path = Path::new(name);
     if let (Some(stem), Some(ext)) =
         (name_path.file_stem().and_then(|s| s.to_str()), name_path.extension().and_then(|e| e.to_str()))
     {
-        let qualified: Option<(&str, &'static str)> = match ext {
-            "c" => Some(("C", "c")),
-            "cpp" => Some(("CPP", "cpp")),
-            "m" if crate::project::objc_capable_platform() => Some(("Obj_C", "objc")),
-            "mm" if crate::project::objc_capable_platform() => Some(("Obj_CPP", "objcpp")),
-            _ => None,
-        };
-        if let Some((dir, suffix)) = qualified {
+        let qualified = dirs.iter().find(|(_, e, _)| *e == ext);
+        if let Some((dir, _, suffix)) = qualified {
             let path = base.join(dir).join(format!("{stem}.{ext}"));
             return if path.is_file() {
                 ResolvedTarget::Found(TargetFile { path, suffix, is_app: false })
@@ -79,7 +103,7 @@ pub fn resolve_target_in(base: &Path, name: &str) -> ResolvedTarget {
     }
 
     let mut found: Vec<TargetFile> = Vec::new();
-    for (dir, ext, suffix) in lang_dirs() {
+    for (dir, ext, suffix) in dirs {
         let file = base.join(dir).join(format!("{name}.{ext}"));
         if file.is_file() {
             found.push(TargetFile { path: file, suffix, is_app: false });
@@ -172,6 +196,32 @@ mod resolve_tests {
         match resolve_target_in(&base, "notanapp") {
             ResolvedTarget::NotFound => {}
             other => panic!("expected NotFound, got {other:?}"),
+        }
+        fs::remove_dir_all(&base).unwrap();
+    }
+
+    /// `resolve_target_in` takes `base` so it never depends on the process
+    /// working directory — that includes which `.cforge.toml` it reads.
+    /// This test runs with cwd left wherever cargo put it (deliberately
+    /// *not* inside the scratch dir) and puts the sources somewhere only
+    /// `base`'s own config names, so it fails if resolution consults the
+    /// cwd's config instead.
+    #[test]
+    fn resolution_uses_the_config_belonging_to_base_not_the_cwd() {
+        let base = scratch_dir("basecfg");
+        fs::write(base.join(".cforge.toml"), "[paths]\nc_src = \"sources\"\n").unwrap();
+        fs::create_dir_all(base.join("sources")).unwrap();
+        fs::write(base.join("sources").join("foo.c"), "").unwrap();
+
+        match resolve_target_in(&base, "foo") {
+            ResolvedTarget::Found(t) => assert_eq!(t.path, base.join("sources").join("foo.c")),
+            other => panic!("expected Found under base's configured c_src, got {other:?}"),
+        }
+        // The extension-qualified path takes a different branch; it must
+        // honour the same config.
+        match resolve_target_in(&base, "foo.c") {
+            ResolvedTarget::Found(t) => assert_eq!(t.path, base.join("sources").join("foo.c")),
+            other => panic!("expected Found for the qualified name, got {other:?}"),
         }
         fs::remove_dir_all(&base).unwrap();
     }
@@ -271,7 +321,11 @@ fn extra_pkg_config_path() -> Option<String> {
         }
         Os::Windows => {
             let pkgconfig = vcpkg_root().join("installed").join(vcpkg_triplet()).join("lib").join("pkgconfig");
-            if pkgconfig.is_dir() { vec![pkgconfig.to_string_lossy().to_string()] } else { Vec::new() }
+            if pkgconfig.is_dir() {
+                vec![pkgconfig.to_string_lossy().to_string()]
+            } else {
+                Vec::new()
+            }
         }
         _ => Vec::new(),
     };
@@ -309,26 +363,17 @@ fn enabled_langs() -> Vec<String> {
 fn discover_all_targets() -> Vec<TargetFile> {
     let mut names = std::collections::BTreeSet::new();
     let enabled = enabled_langs();
-    let cfg = Config::load();
 
-    // Build list of (dir, ext, lang) tuples using config paths
-    let all_dirs: Vec<(&str, &str, &str)> = if crate::project::objc_capable_platform() {
-        vec![
-            (cfg.src_dir("c"), "c", "c"),
-            (cfg.src_dir("cpp"), "cpp", "cpp"),
-            (cfg.src_dir("obj_c"), "m", "obj_c"),
-            (cfg.src_dir("obj_cpp"), "mm", "obj_cpp"),
-        ]
-    } else {
-        vec![
-            (cfg.src_dir("c"), "c", "c"),
-            (cfg.src_dir("cpp"), "cpp", "cpp"),
-        ]
-    };
-
-    let dirs: Vec<(&str, &str)> =
-        all_dirs.iter().filter(|(_, _, lang)| enabled.iter().any(|l| l == lang)).map(|(d, e, _)| (*d, *e)).collect();
-    for (dir, ext) in dirs {
+    // Same (dir, ext, suffix) source of truth `resolve_target` uses, so a
+    // name discovered here always resolves there. Computed once and reused
+    // for every resolution below, rather than re-reading .cforge.toml per
+    // discovered target.
+    let base = Path::new(".");
+    let dirs = lang_dirs_in(base);
+    for (dir, ext, suffix) in &dirs {
+        if !enabled.iter().any(|l| l == suffix_to_lang(suffix)) {
+            continue;
+        }
         if let Ok(entries) = fs::read_dir(dir) {
             for entry in entries.flatten() {
                 let path = entry.path();
@@ -363,7 +408,7 @@ fn discover_all_targets() -> Vec<TargetFile> {
     }
     names
         .into_iter()
-        .filter_map(|name| match resolve_target(&name) {
+        .filter_map(|name| match resolve_with(base, &dirs, &name) {
             ResolvedTarget::Found(t) => Some(t),
             ResolvedTarget::NotFound => None,
             // Two files sharing a base name across languages (e.g.
@@ -398,14 +443,23 @@ fn resolve_or_die(name: &str) -> TargetFile {
         ResolvedTarget::Found(t) => {
             let lang = suffix_to_lang(t.suffix);
             if !enabled_langs().iter().any(|l| l == lang) {
-                eprintln!("Error: language '{lang}' is not enabled for this project — run 'cforge lang add {lang}' first.");
+                eprintln!(
+                    "Error: language '{lang}' is not enabled for this project — run 'cforge lang add {lang}' first."
+                );
                 std::process::exit(1);
             }
             t
         }
         ResolvedTarget::NotFound => {
-            eprintln!("Error: no source file or app directory found for target '{name}' (looked for C/{name}.c, CPP/{name}.cpp{}, or a C/{name}/ or CPP/{name}/ directory of sources).",
-                if crate::project::objc_capable_platform() { format!(", Obj_C/{name}.m, Obj_CPP/{name}.mm") } else { String::new() });
+            // Built from lang_dirs() rather than a hardcoded "C/, CPP/"
+            // list, so a project with configured source paths is told
+            // where cforge actually looked.
+            let looked: Vec<String> =
+                lang_dirs().iter().map(|(dir, ext, _)| format!("{dir}/{name}.{ext} or {dir}/{name}/")).collect();
+            eprintln!(
+                "Error: no source file or app directory found for target '{name}' (looked for {}).",
+                looked.join(", ")
+            );
             std::process::exit(1);
         }
         ResolvedTarget::Ambiguous(paths) => {
@@ -418,6 +472,14 @@ fn resolve_or_die(name: &str) -> TargetFile {
 }
 
 fn configure(build_dir: &Path) {
+    // .cforge_config.cmake is what tells CMake where the sources live. It
+    // was only rewritten by `cforge config set`, so hand-editing
+    // .cforge.toml (which the generated file's own header tells you to do)
+    // left CMake configuring against the old paths while cforge resolved
+    // targets against the new ones. Regenerating here — a small file
+    // write — keeps the two from ever diverging.
+    crate::cmake::generate_cforge_config();
+
     // Installs a compiler if the machine has none, and picks between them
     // if it has several. No-op once this project has one pinned.
     crate::toolchain::ensure_compiler_selected();
@@ -440,24 +502,27 @@ fn configure(build_dir: &Path) {
         args.push(format!("-DCMAKE_BUILD_TYPE={}", profile.cmake_value()));
     }
 
+    // Not "..": a configured build directory can be nested ("out/debug"),
+    // and one `..` from there is not the source tree.
+    let source_dir = std::env::current_dir().unwrap_or_else(|e| {
+        eprintln!("Error: could not determine the current directory: {e}");
+        std::process::exit(1);
+    });
     let mut configure_cmd = Command::new("cmake");
-    configure_cmd.arg("..").args(&args).current_dir(build_dir);
+    configure_cmd.arg(&source_dir).args(&args).current_dir(build_dir);
     if let Some(pkg_config_path) = extra_pkg_config_path() {
         configure_cmd.env("PKG_CONFIG_PATH", pkg_config_path);
     }
     if flags.verbose >= 2 || flags.dry_run {
-        println!("+ cmake .. {} (in {})", args.join(" "), build_dir.display());
+        println!("+ cmake {} {} (in {})", source_dir.display(), args.join(" "), build_dir.display());
     }
     if flags.dry_run {
         return;
     }
-    let status = configure_cmd
-        .stdout(std::process::Stdio::null())
-        .status()
-        .unwrap_or_else(|e| {
-            eprintln!("Error: failed to run cmake: {e}");
-            std::process::exit(1);
-        });
+    let status = configure_cmd.stdout(std::process::Stdio::null()).status().unwrap_or_else(|e| {
+        eprintln!("Error: failed to run cmake: {e}");
+        std::process::exit(1);
+    });
     if !status.success() {
         eprintln!("Error: cmake configure failed.");
         std::process::exit(1);
@@ -478,15 +543,7 @@ fn target_name(target_file: &TargetFile) -> String {
 
 fn build_target(build_dir: &Path, target_file: &TargetFile) -> String {
     let target = target_name(target_file);
-
-    let flags = crate::flags::get();
-    let mut args = vec!["--build".to_string(), ".".to_string(), "--target".to_string(), target.clone()];
-    if let Some(jobs) = flags.jobs {
-        args.push("-j".to_string());
-        args.push(jobs.to_string());
-    }
-    let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    platform::run_or_die_in(build_dir, "cmake", &arg_refs, &format!("build failed for target '{target}'"));
+    build_named_target(build_dir, &target);
     target
 }
 
@@ -496,6 +553,12 @@ fn build_target(build_dir: &Path, target_file: &TargetFile) -> String {
 /// These aren't `TargetFile`s: they have no `main()`, so they're excluded
 /// from `discover_all_targets`/`resolve_target_in` and built separately.
 fn discover_ffi_lib_targets() -> Vec<String> {
+    // CMakeLists only registers these when cpp is an enabled language, so
+    // asking for the target otherwise is a guaranteed "No rule to make
+    // target" failure rather than a no-op.
+    if !enabled_langs().iter().any(|l| l == "cpp") {
+        return Vec::new();
+    }
     let cfg = Config::load();
     let dir = cfg.src_dir("cpp");
     let Ok(entries) = fs::read_dir(dir) else { return Vec::new() };
@@ -523,7 +586,7 @@ fn build_named_target(build_dir: &Path, target: &str) {
 /// order they were built, so callers like `run()` can reuse the
 /// resolution instead of re-scanning the filesystem.
 pub fn build(targets: &[String]) -> Vec<TargetFile> {
-    let build_dir = Path::new("build");
+    let build_dir = &std::path::PathBuf::from(Config::load().build_dir());
     configure(build_dir);
 
     let resolved: Vec<TargetFile> = if targets.is_empty() {
@@ -560,7 +623,7 @@ pub fn run(target: &str, program_args: &[String]) -> ! {
     });
 
     let exe_name = target_name(&target_file);
-    let build_dir = Path::new("build");
+    let build_dir = &std::path::PathBuf::from(Config::load().build_dir());
     let exe = build_dir.join(&exe_name);
 
     if crate::flags::get().dry_run {
@@ -590,7 +653,7 @@ pub fn run(target: &str, program_args: &[String]) -> ! {
 }
 
 pub fn clean(all: bool) {
-    let build_dir = Path::new("build");
+    let build_dir = &std::path::PathBuf::from(Config::load().build_dir());
     if !build_dir.exists() {
         platform::status("Nothing to clean (no build/ directory).");
         return;
@@ -614,7 +677,7 @@ pub fn clean(all: bool) {
 /// Named `run_tests` rather than `test` to avoid any confusion with
 /// `#[cfg(test)]` in this same file.
 pub fn run_tests(filter: Option<&str>) {
-    let build_dir = Path::new("build");
+    let build_dir = &std::path::PathBuf::from(Config::load().build_dir());
     if !build_dir.join("CMakeCache.txt").exists() {
         eprintln!("Error: no configured build in build/ — run 'cforge build' first.");
         std::process::exit(1);
@@ -664,7 +727,9 @@ pub fn add_library(lib: &str) {
     lock.record(lib, &resolved_pkg, crate::pkgmgr::platform_key());
     lock.save();
 
-    platform::status(&format!("Added '{lib}' (resolved to package '{resolved_pkg}'). It will be linked into all targets on the next build."));
+    platform::status(&format!(
+        "Added '{lib}' (resolved to package '{resolved_pkg}'). It will be linked into all targets on the next build."
+    ));
 }
 
 pub fn remove_library(lib: &str) {
@@ -767,13 +832,27 @@ pub fn search(query: &str) {
     let mgr = ensure_pkg_manager();
     println!("Searching for '{query}'...");
     match mgr {
-        PkgManager::Brew => { Command::new("brew").args(["search", query]).status().ok(); }
-        PkgManager::Apt => { Command::new("apt-cache").args(["search", query]).status().ok(); }
-        PkgManager::Dnf => { Command::new("dnf").args(["search", query]).status().ok(); }
-        PkgManager::Yum => { Command::new("yum").args(["search", query]).status().ok(); }
-        PkgManager::Pacman => { Command::new("pacman").args(["-Ss", query]).status().ok(); }
-        PkgManager::Zypper => { Command::new("zypper").args(["search", query]).status().ok(); }
-        PkgManager::Apk => { Command::new("apk").args(["search", query]).status().ok(); }
+        PkgManager::Brew => {
+            Command::new("brew").args(["search", query]).status().ok();
+        }
+        PkgManager::Apt => {
+            Command::new("apt-cache").args(["search", query]).status().ok();
+        }
+        PkgManager::Dnf => {
+            Command::new("dnf").args(["search", query]).status().ok();
+        }
+        PkgManager::Yum => {
+            Command::new("yum").args(["search", query]).status().ok();
+        }
+        PkgManager::Pacman => {
+            Command::new("pacman").args(["-Ss", query]).status().ok();
+        }
+        PkgManager::Zypper => {
+            Command::new("zypper").args(["search", query]).status().ok();
+        }
+        PkgManager::Apk => {
+            Command::new("apk").args(["search", query]).status().ok();
+        }
         PkgManager::Winget | PkgManager::None => {}
     }
 }
@@ -783,20 +862,9 @@ mod libs_tests {
     use super::*;
     use std::fs;
 
-    fn in_scratch_dir<T>(label: &str, f: impl FnOnce() -> T) -> T {
-        let dir = std::env::temp_dir().join(format!("cforge_test_libs_{label}_{}", std::process::id()));
-        fs::create_dir_all(&dir).unwrap();
-        let original = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&dir).unwrap();
-        let result = f();
-        std::env::set_current_dir(original).unwrap();
-        fs::remove_dir_all(&dir).ok();
-        result
-    }
-
     #[test]
     fn remove_deletes_only_matching_line() {
-        in_scratch_dir("remove", || {
+        crate::platform::in_scratch_dir("remove", || {
             fs::write("libs.txt", "openssl\nsqlite3\n").unwrap();
             remove_library("openssl");
             let remaining = fs::read_to_string("libs.txt").unwrap();

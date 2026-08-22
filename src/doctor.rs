@@ -57,9 +57,13 @@ pub fn run() {
                 let runtime = if os() == Os::Macos { "apple-clang" } else { "gnustep" };
                 if ok {
                     let bad_pin = if lang == "obj_c" {
-                        std_pin_status("CMAKE_OBJC_STANDARD", |v| probe_std(c_compiler(), &format!("-std=c{v}"), "objective-c"))
+                        std_pin_status("CMAKE_OBJC_STANDARD", |v| {
+                            probe_std(c_compiler(), &format!("-std=c{v}"), "objective-c")
+                        })
                     } else {
-                        std_pin_status("CMAKE_OBJCXX_STANDARD", |v| probe_std(cxx_compiler(), &format!("-std=c++{v}"), "objective-c++"))
+                        std_pin_status("CMAKE_OBJCXX_STANDARD", |v| {
+                            probe_std(cxx_compiler(), &format!("-std=c++{v}"), "objective-c++")
+                        })
                     };
                     match bad_pin {
                         None => println!("{lang}: {} ({runtime})", green("ok")),
@@ -78,7 +82,9 @@ pub fn run() {
                     let bad_pin = if lang == "c" {
                         std_pin_status("CMAKE_C_STANDARD", |v| probe_std(c_compiler(), &format!("-std=c{v}"), "c"))
                     } else {
-                        std_pin_status("CMAKE_CXX_STANDARD", |v| probe_std(cxx_compiler(), &format!("-std=c++{v}"), "c++"))
+                        std_pin_status("CMAKE_CXX_STANDARD", |v| {
+                            probe_std(cxx_compiler(), &format!("-std=c++{v}"), "c++")
+                        })
                     };
                     let version = run_capture(c_compiler(), &["--version"]).unwrap_or_default();
                     let first_line = version.lines().next().unwrap_or("");
@@ -105,13 +111,17 @@ pub fn run() {
     // Surfaces what `latest` would currently resolve to, so a user pinned
     // to an old standard can see there's room to move up.
     println!();
-    println!("latest available standards: c={} cxx={}",
+    println!(
+        "latest available standards: c={} cxx={}",
         latest_c_std().unwrap_or_else(|| "none".to_string()),
-        latest_cxx_std().unwrap_or_else(|| "none".to_string()));
+        latest_cxx_std().unwrap_or_else(|| "none".to_string())
+    );
     if os() == Os::Macos {
-        println!("                             objc={} objcpp={}",
+        println!(
+            "                             objc={} objcpp={}",
             latest_objc_std().unwrap_or_else(|| "none".to_string()),
-            latest_objcxx_std().unwrap_or_else(|| "none".to_string()));
+            latest_objcxx_std().unwrap_or_else(|| "none".to_string())
+        );
     }
 
     // Libraries this project depends on (libs.txt) — each is re-verified

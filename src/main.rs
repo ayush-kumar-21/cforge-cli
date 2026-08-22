@@ -12,6 +12,7 @@ mod pkgmgr;
 mod platform;
 mod project;
 mod selfmgmt;
+mod sha256;
 mod templates;
 mod toolchain;
 mod version;
@@ -23,7 +24,20 @@ pub fn usage() -> ! {
     println!();
     println!("PROJECT SETUP");
     let row = |cmd: &str, args: &str, desc: &str| println!("    {cmd:<22} {args:<28} {desc}");
-    row("new", "<name> [opts]", "Scaffold a new project; run 'cforge new -h' for --lang/--ffi/--template");
+    row(
+        "new",
+        "<name> [opts]",
+        "Scaffold a new project (single-language by default); run 'cforge new -h' for --lang/--ffi/--template",
+    );
+    row("new-c-app", "<name> [opts]", "Scaffold a C project; picks a template from a menu unless --template is given");
+    row("new-cpp-app", "<name> [opts]", "Same as new-c-app, for C++");
+    row("new-objc-app", "<name> [opts]", "Same as new-c-app, for Objective-C (macOS full, Linux/GNUstep caveats)");
+    row("new-objcpp-app", "<name> [opts]", "Same as new-c-app, for Objective-C++ (macOS full, Linux/GNUstep caveats)");
+    row(
+        "new-rust-app",
+        "<name> [opts]",
+        "Scaffold a Rust project via cargo (not a cforge/CMake project); templates or picks from a menu",
+    );
     row("init", "", "Initialize cforge in the current directory");
     row("info", "", "Show project config: languages, standards, libraries");
     println!();
@@ -96,8 +110,16 @@ pub fn usage() -> ! {
     println!("Examples:");
     for line in [
         "cforge new myapp",
+        "cforge new myapp --lang cpp",
         "cforge new myapp --lang c cpp",
         "cforge new mytool --template cli",
+        "cforge new mylib --template lib --lib-type shared",
+        "cforge new myheaders --template header-lib",
+        "cforge new mytested --template test",
+        "cforge new myserver --template server",
+        "cforge new-c-app myapp",
+        "cforge new-cpp-app myapp --template cli",
+        "cforge new-rust-app myapp --lib",
         "cforge init",
         "cforge info",
         "cforge build",
@@ -128,7 +150,7 @@ pub fn usage() -> ! {
 }
 
 pub fn usage_error(msg: &str) -> ! {
-    eprintln!("{} {msg}", color::red("error:"));
+    eprintln!("{} {msg}", color::red_err("error:"));
     eprintln!("Try 'cforge --help' for more information.");
     std::process::exit(2);
 }
@@ -140,17 +162,46 @@ pub fn usage_error(msg: &str) -> ! {
 fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
     let text: Option<&str> = match (cmd, sub) {
         ("new", _) => Some(
-            "Usage: cforge new <name> [--lang <lang>...] [--ffi rust] [--template <name>]\n\n\
+            "Usage: cforge new <name> [--lang <lang>...] [--ffi rust] [--template <name>] [--lib-type <kind>]\n\n\
              Scaffolds a new project directory: creates <name>/, writes CMakeLists.txt,\n\
-             creates C/CPP/Obj_C/Obj_CPP/build directories, and enables the given\n\
-             languages (default: all platform-supported languages).\n\n\
+             creates the enabled languages' source directories plus build/, and enables\n\
+             the given languages (default: just c — a project is single-language unless\n\
+             --lang says otherwise).\n\n\
              Options:\n\
              \x20\x20--lang <lang>...   Languages to enable (c|cpp|obj_c|obj_cpp)\n\
              \x20\x20--ffi rust         Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  links against it — for Rust projects calling into C/C++.\n\
-             \x20\x20--template <name>  Scaffold a real multi-file starter program into\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>/ as one linked executable (cli).",
+             \x20\x20--template <name>  Scaffold a real starter program, natively implemented\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  for whichever language applies (the first --lang given,\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  or c if --lang was omitted). One of:\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20    cli         a command-line app\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20    lib         a compiled library (see --lib-type)\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20    header-lib  a header-only library + example\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20    test        an app plus a CTest-registered test executable\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20    server      a minimal cross-platform TCP echo server\n\
+             \x20\x20--lib-type <kind>  static (default) or shared — only used with\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  --template lib.",
+        ),
+        ("new-c-app", _) | ("new-cpp-app", _) | ("new-objc-app", _) | ("new-objcpp-app", _) => Some(
+            "Usage: cforge new-<c|cpp|objc|objcpp>-app <name> [--template <name>] [--lib-type <kind>]\n\n\
+             npm-create-style shortcut for 'cforge new': the language is fixed by which\n\
+             command you run (no --lang needed). If --template isn't given and this is\n\
+             an interactive terminal, an arrow-key menu picks one (or 'none' for a bare\n\
+             project) — same template list as 'cforge new -h'. obj_c/obj_cpp still\n\
+             follow the usual platform rules (full on macOS, Linux/GNUstep caveats,\n\
+             unsupported on Windows).",
+        ),
+        ("new-rust-app", _) => Some(
+            "Usage: cforge new-rust-app <name> [--template <name>] | [cargo-new options...]\n\n\
+             A plain Rust/Cargo project, not a cforge/CMake one — cforge hands off to\n\
+             cargo entirely. With --template (or the arrow-key menu, if this is an\n\
+             interactive terminal and no --template/extra args were given), drives\n\
+             'cargo new' itself and scaffolds idiomatic Rust source on top: cli (clap),\n\
+             lib, header-lib (#[inline] utility crate), test (#[cfg(test)]), server\n\
+             (std::net echo server). With neither, extra arguments pass straight\n\
+             through to a plain 'cargo new', e.g. 'cforge new-rust-app mylib --lib'.\n\
+             Requires cargo on PATH (rustup.rs).",
         ),
         ("init", _) => Some(
             "Usage: cforge init\n\n\
@@ -180,8 +231,9 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
         ),
         ("install", _) => Some(
             "Usage: cforge install [--prefix <path>]\n\n\
-             Runs the CMake install step (installs built executables to <prefix>/bin,\n\
-             default /usr/local/bin). Requires a prior 'cforge build'.",
+             Runs the CMake install step (installs built executables to <prefix>/bin).\n\
+             With no --prefix, CMake's own default applies (/usr/local on macOS and\n\
+             Linux). Requires a prior 'cforge build'.",
         ),
         ("package", _) => Some(
             "Usage: cforge package [--format <fmt>]\n\n\
@@ -370,9 +422,17 @@ fn main() {
             let (langs, remaining) = split_lang_flag(args);
             let (ffi, remaining) = split_value_flag(&remaining, "--ffi");
             let (template, remaining) = split_value_flag(&remaining, "--template");
+            let (lib_type, remaining) = split_value_flag(&remaining, "--lib-type");
             if let Some(t) = &template {
                 templates::validate_template(t);
             }
+            let lib_type = lib_type.unwrap_or_else(|| "static".to_string());
+            templates::validate_lib_type(&lib_type);
+            // Which language --template applies to: the first --lang given
+            // (as typed), or the single-language default (c) if --lang was
+            // omitted entirely. Each of c/cpp/obj_c/obj_cpp has its own
+            // native template implementation (see templates/mod.rs).
+            let template_lang = langs.first().cloned().unwrap_or_else(|| "c".to_string());
             let name = remaining.first().map(|s| s.as_str()).unwrap_or("");
             project::new_project(name, &langs);
             if let Some(target) = ffi {
@@ -384,7 +444,73 @@ fn main() {
                 ffi::scaffold_rust_ffi(&project::current_project_name());
             }
             if let Some(t) = template {
-                templates::scaffold(&t, &project::current_project_name());
+                templates::scaffold(&t, &project::current_project_name(), &lib_type, &template_lang);
+            }
+        }
+        // npm-create-style shortcuts: the language is picked by which
+        // command you type (no --lang needed), then the template is picked
+        // from an arrow-key menu (templates::prompt_choice) unless
+        // --template was given explicitly. obj_c/obj_cpp still go through
+        // project::new_project's validate_lang, so the existing
+        // macOS-full/Linux-caveats/Windows-unsupported rules still apply.
+        "new-c-app" | "new-cpp-app" | "new-objc-app" | "new-objcpp-app" => {
+            let lang = match cmd {
+                "new-c-app" => "c",
+                "new-cpp-app" => "cpp",
+                "new-objc-app" => "obj_c",
+                "new-objcpp-app" => "obj_cpp",
+                _ => unreachable!(),
+            };
+            let (template, remaining) = split_value_flag(args, "--template");
+            let (lib_type, remaining) = split_value_flag(&remaining, "--lib-type");
+            let name = remaining.first().map(|s| s.as_str()).unwrap_or("");
+            project::new_project(name, &[lang.to_string()]);
+            let (template, lib_type) = if let Some(t) = template {
+                templates::validate_template(&t);
+                let lib_type = lib_type.unwrap_or_else(|| "static".to_string());
+                templates::validate_lib_type(&lib_type);
+                (Some(t), lib_type)
+            } else {
+                templates::prompt_choice()
+            };
+            if let Some(t) = template {
+                templates::scaffold(&t, &project::current_project_name(), &lib_type, lang);
+            }
+        }
+        // No CMake, no langs.txt — cforge doesn't build Rust projects, just
+        // hands off to cargo for them (templates/rust.rs). --template (or
+        // the arrow-key picker, same as the other new-*-app commands)
+        // drives 'cargo new' itself and scaffolds idiomatic Rust source on
+        // top; with neither given, any extra args pass straight through to
+        // a plain 'cargo new' (e.g. 'cforge new-rust-app foo --lib').
+        "new-rust-app" => {
+            let (template, remaining) = split_value_flag(args, "--template");
+            if remaining.is_empty() {
+                usage_error("new-rust-app requires a project name");
+            }
+            let name = &remaining[0];
+            let extra = &remaining[1..];
+            if let Some(t) = &template {
+                templates::rust::validate_template(t);
+            }
+            let picked = template.or_else(|| if extra.is_empty() { templates::rust::prompt_choice() } else { None });
+            match picked {
+                Some(t) => templates::rust::scaffold(name, &t),
+                None => {
+                    if !platform::command_exists("cargo") {
+                        eprintln!("Error: cargo not found on PATH — install Rust from https://rustup.rs first.");
+                        std::process::exit(1);
+                    }
+                    let status = std::process::Command::new("cargo").arg("new").arg(name).args(extra).status();
+                    match status {
+                        Ok(s) if s.success() => {}
+                        Ok(s) => std::process::exit(s.code().unwrap_or(1)),
+                        Err(e) => {
+                            eprintln!("Error: could not run cargo: {e}");
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
         }
         "init" => project::init(),
@@ -412,13 +538,18 @@ fn main() {
             Some("list") => toolchain::list(),
             Some("install") => toolchain_install(&args[1..]),
             Some("use") => {
-                let lang = args.get(1).map(|s| s.as_str()).unwrap_or_else(|| usage_error("toolchain use requires a language"));
-                let compiler = args.get(2).map(|s| s.as_str()).unwrap_or_else(|| usage_error("toolchain use requires a compiler"));
+                let lang =
+                    args.get(1).map(|s| s.as_str()).unwrap_or_else(|| usage_error("toolchain use requires a language"));
+                let compiler =
+                    args.get(2).map(|s| s.as_str()).unwrap_or_else(|| usage_error("toolchain use requires a compiler"));
                 toolchain::use_compiler(lang, compiler);
             }
             Some("default") => toolchain::default_toolchain(),
             Some("remove") => {
-                let compiler = args.get(1).map(|s| s.as_str()).unwrap_or_else(|| usage_error("toolchain remove requires a compiler name"));
+                let compiler = args
+                    .get(1)
+                    .map(|s| s.as_str())
+                    .unwrap_or_else(|| usage_error("toolchain remove requires a compiler name"));
                 toolchain::remove(compiler);
             }
             _ => usage_error("expected 'toolchain list|install|use|default|remove'"),
@@ -462,7 +593,9 @@ fn main() {
             }
         }
         "list" => build::list_libs(),
-        "search" => build::search(args.first().map(|s| s.as_str()).unwrap_or_else(|| usage_error("search requires a query"))),
+        "search" => {
+            build::search(args.first().map(|s| s.as_str()).unwrap_or_else(|| usage_error("search requires a query")))
+        }
         "deps" => match args.first().map(|s| s.as_str()) {
             Some("sync") => build::deps_sync(),
             Some("show") => build::deps_show(),
@@ -471,7 +604,8 @@ fn main() {
         "generate" => {
             let (langs, remaining) = split_lang_flag(args);
             let name = remaining.first().map(|s| s.as_str()).unwrap_or("");
-            let lang = langs.first().map(|s| s.as_str()).unwrap_or_else(|| usage_error("generate requires --lang <lang>"));
+            let lang =
+                langs.first().map(|s| s.as_str()).unwrap_or_else(|| usage_error("generate requires --lang <lang>"));
             project::generate(name, lang);
         }
         "format" => codetools::format(args),
@@ -563,7 +697,9 @@ fn config_set(key: &str, path: &str) {
         "obj_cpp_src" => cfg.paths.obj_cpp_src = path.to_string(),
         "headers" => cfg.paths.headers = path.to_string(),
         "build" => cfg.paths.build = path.to_string(),
-        other => usage_error(&format!("unknown config key '{other}' (expected c_src|cpp_src|obj_c_src|obj_cpp_src|headers|build)")),
+        other => usage_error(&format!(
+            "unknown config key '{other}' (expected c_src|cpp_src|obj_c_src|obj_cpp_src|headers|build)"
+        )),
     }
     cfg.save();
     cmake::generate_cforge_config();

@@ -1,12 +1,17 @@
 //! `cforge install`/`package`: `cmake --install` and `cpack` wrappers.
+use crate::config::Config;
 use crate::platform;
-use std::path::Path;
+use std::path::PathBuf;
 
 const PACKAGE_FORMATS: &[(&str, &str)] =
     &[("tgz", "TGZ"), ("zip", "ZIP"), ("dmg", "DragNDrop"), ("deb", "DEB"), ("rpm", "RPM")];
 
+fn build_dir() -> PathBuf {
+    PathBuf::from(Config::load().build_dir())
+}
+
 fn require_build_dir() {
-    if !Path::new("build").join("CMakeCache.txt").exists() {
+    if !build_dir().join("CMakeCache.txt").exists() {
         eprintln!("Error: no configured build; run 'cforge build' first.");
         std::process::exit(1);
     }
@@ -25,7 +30,7 @@ pub fn install(prefix: Option<&str>) {
         args.push(profile.cmake_value().to_string());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    platform::run_or_die_in(Path::new("build"), "cmake", &arg_refs, "install failed");
+    platform::run_or_die_in(&build_dir(), "cmake", &arg_refs, "install failed");
     platform::status("Installed.");
 }
 
@@ -46,7 +51,7 @@ pub fn package(format: Option<&str>) {
         args.push(profile.cmake_value().to_string());
     }
     let arg_refs: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
-    platform::run_or_die_in(Path::new("build"), "cpack", &arg_refs, "package failed");
+    platform::run_or_die_in(&build_dir(), "cpack", &arg_refs, "package failed");
     platform::status(&format!("Packaged as {fmt}."));
 }
 

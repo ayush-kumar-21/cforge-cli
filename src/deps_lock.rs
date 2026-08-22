@@ -22,10 +22,7 @@ pub struct LockedLib {
 
 impl DepsLock {
     pub fn load() -> DepsLock {
-        fs::read_to_string(LOCK_FILE)
-            .ok()
-            .and_then(|s| toml::from_str(&s).ok())
-            .unwrap_or_default()
+        fs::read_to_string(LOCK_FILE).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default()
     }
 
     pub fn save(&self) {
@@ -43,7 +40,8 @@ impl DepsLock {
             package: package.to_string(),
             platform: platform.to_string(),
         });
-        self.library.sort_by(|a, b| (a.name.as_str(), a.platform.as_str()).cmp(&(b.name.as_str(), b.platform.as_str())));
+        self.library
+            .sort_by(|a, b| (a.name.as_str(), a.platform.as_str()).cmp(&(b.name.as_str(), b.platform.as_str())));
     }
 
     pub fn remove(&mut self, name: &str) {

@@ -46,7 +46,11 @@ pub fn objc_capable_platform() -> bool {
 /// `default_langs_for_platform()`: every known language except on
 /// Windows, where obj_c/obj_cpp have no viable toolchain at all.
 pub fn all_langs() -> &'static [&'static str] {
-    if objc_capable_platform() { &["c", "cpp", "obj_c", "obj_cpp"] } else { &["c", "cpp"] }
+    if objc_capable_platform() {
+        &["c", "cpp", "obj_c", "obj_cpp"]
+    } else {
+        &["c", "cpp"]
+    }
 }
 
 pub fn validate_lang(lang: &str) {
@@ -68,9 +72,7 @@ fn write_langs_file(langs: &[String]) {
 }
 
 pub(crate) fn read_langs_file() -> Vec<String> {
-    fs::read_to_string("langs.txt")
-        .map(|s| s.lines().map(|l| l.to_string()).collect())
-        .unwrap_or_default()
+    fs::read_to_string("langs.txt").map(|s| s.lines().map(|l| l.to_string()).collect()).unwrap_or_default()
 }
 
 pub fn lang_add(langs: &[String]) {
@@ -106,6 +108,21 @@ pub fn lang_remove(langs: &[String]) {
     for lang in langs {
         validate_lang(lang);
         current.retain(|l| l != lang);
+    }
+    // An empty langs.txt means "no languages pinned", which every reader
+    // (build.rs's enabled_langs, lang_list, info) expands to *all*
+    // platform-supported languages. So removing the last one did the
+    // opposite of what was asked: `cforge lang remove c` on a C-only
+    // project left it building c, cpp, obj_c and obj_cpp. Refuse instead
+    // — the same way `toolchain remove` refuses to strip the last
+    // compiler a language needs.
+    if current.is_empty() {
+        eprintln!(
+            "Error: that would remove every language from the project, which reads as 'no languages pinned' \
+             and builds all of them ({}). Add another language first, or delete langs.txt to opt into that default.",
+            all_langs().join(", ")
+        );
+        std::process::exit(1);
     }
     write_langs_file(&current);
     platform::status(&format!("Configured project for: {}", current.join(" ")));
@@ -149,11 +166,12 @@ pub fn generate(name: &str, ext: &str) {
 }
 
 fn sanitize_project_name(raw: &str) -> String {
-    let s: String = raw
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
-        .collect();
-    if s.is_empty() { "project".to_string() } else { s }
+    let s: String = raw.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+    if s.is_empty() {
+        "project".to_string()
+    } else {
+        s
+    }
 }
 
 /// The project name as `init()` derives it: the current directory's
@@ -164,10 +182,7 @@ fn sanitize_project_name(raw: &str) -> String {
 /// that raw argument, since directory name and CLI argument can differ.
 pub fn current_project_name() -> String {
     let cwd = std::env::current_dir().unwrap_or_else(|_| Path::new(".").to_path_buf());
-    let dir_name = cwd
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "project".to_string());
+    let dir_name = cwd.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "project".to_string());
     sanitize_project_name(&dir_name)
 }
 
@@ -190,7 +205,8 @@ pub fn init() {
     // gets dead Obj_C/Obj_CPP folders on Windows, where they can never be
     // built.
     let enabled = read_langs_file();
-    let enabled: Vec<&str> = if enabled.is_empty() { all_langs().to_vec() } else { enabled.iter().map(|s| s.as_str()).collect() };
+    let enabled: Vec<&str> =
+        if enabled.is_empty() { all_langs().to_vec() } else { enabled.iter().map(|s| s.as_str()).collect() };
     let src_dirs = enabled.iter().map(|lang| cfg.src_dir(lang));
     let dirs = src_dirs.chain(std::iter::once(cfg.paths.build.as_str()));
     for dir in dirs {
@@ -202,11 +218,30 @@ pub fn init() {
     platform::status("Initialized CMakeLists.txt and project directories.");
 }
 
-/// `langs` empty means "all platform-supported languages" (same default
-/// as before). Standards are no longer set here — they always start at
-/// whatever `init()`'s generated CMakeLists.txt defaults to (latest), and
-/// `std set` is the only way to change them, matching the reference doc's
-/// `new` command which takes no standards arguments at all.
+/// An explicit --lang list is the exact set for this project, not an
+/// addition to the platform defaults — `lang_add` (used by `lang add`,
+/// where "add to what's there" is the right semantics) would otherwise
+/// just merge it into the full default set. Empty means "no --lang given",
+/// which now means "just c" — a project is single-language unless --lang
+/// says otherwise.
+fn resolve_new_langs(langs: &[String]) -> Vec<String> {
+    let mut explicit: Vec<String> = if langs.is_empty() {
+        vec!["c".to_string()]
+    } else {
+        for l in langs {
+            validate_lang(l);
+        }
+        langs.to_vec()
+    };
+    explicit.sort();
+    explicit.dedup();
+    explicit
+}
+
+/// Standards are no longer set here — they always start at whatever
+/// `init()`'s generated CMakeLists.txt defaults to (latest), and `std set`
+/// is the only way to change them, matching the reference doc's `new`
+/// command which takes no standards arguments at all.
 pub fn new_project(name: &str, langs: &[String]) {
     if name.is_empty() {
         crate::usage_error("new requires a project name");
@@ -229,21 +264,7 @@ pub fn new_project(name: &str, langs: &[String]) {
     // Installs a compiler if there's none, and asks which to use if the
     // machine has several — so the project is ready to build on exit.
     crate::toolchain::ensure_compiler_selected();
-    // An explicit --lang list is the exact set for this project, not an
-    // addition to the platform defaults — `lang_add` (used by `lang add`,
-    // where "add to what's there" is the right semantics) would otherwise
-    // just merge it into the full default set. Empty means "no --lang
-    // given", which still means "all platform-supported languages".
-    let mut explicit: Vec<String> = if langs.is_empty() {
-        all_langs().iter().map(|s| s.to_string()).collect()
-    } else {
-        for l in langs {
-            validate_lang(l);
-        }
-        langs.to_vec()
-    };
-    explicit.sort();
-    explicit.dedup();
+    let explicit = resolve_new_langs(langs);
     write_langs_file(&explicit);
     platform::status(&format!("Configured project for: {}", explicit.join(" ")));
     // init() reads langs.txt (written above) to decide which source
@@ -253,11 +274,8 @@ pub fn new_project(name: &str, langs: &[String]) {
 
 pub fn info() {
     let langs = read_langs_file();
-    let langs_display = if langs.is_empty() {
-        format!("{} (default: all supported)", all_langs().join(" "))
-    } else {
-        langs.join(" ")
-    };
+    let langs_display =
+        if langs.is_empty() { format!("{} (default: all supported)", all_langs().join(" ")) } else { langs.join(" ") };
     println!("Languages: {langs_display}");
 
     let cmakelists = Path::new("CMakeLists.txt");
@@ -308,5 +326,18 @@ mod capability_tests {
         assert_eq!(lang_capability("cpp"), LangCapability::Supported);
         assert_eq!(lang_capability("obj_c") == LangCapability::Unsupported, !objc_capable_platform());
         assert_eq!(lang_capability("obj_cpp") == LangCapability::Unsupported, !objc_capable_platform());
+    }
+
+    /// `cforge new` with no --lang is single-language (just c), not the
+    /// full platform-supported set — the regression this locks in.
+    #[test]
+    fn no_explicit_lang_defaults_to_c_only() {
+        assert_eq!(resolve_new_langs(&[]), vec!["c".to_string()]);
+    }
+
+    #[test]
+    fn explicit_lang_list_is_used_as_is() {
+        assert_eq!(resolve_new_langs(&["cpp".to_string()]), vec!["cpp".to_string()]);
+        assert_eq!(resolve_new_langs(&["cpp".to_string(), "c".to_string()]), vec!["c".to_string(), "cpp".to_string()]);
     }
 }

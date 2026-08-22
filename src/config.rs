@@ -28,12 +28,24 @@ pub struct Paths {
     pub build: String,
 }
 
-fn default_c_src() -> String { "C".to_string() }
-fn default_cpp_src() -> String { "CPP".to_string() }
-fn default_obj_c_src() -> String { "Obj_C".to_string() }
-fn default_obj_cpp_src() -> String { "Obj_CPP".to_string() }
-fn default_headers() -> String { "include".to_string() }
-fn default_build() -> String { "build".to_string() }
+fn default_c_src() -> String {
+    "C".to_string()
+}
+fn default_cpp_src() -> String {
+    "CPP".to_string()
+}
+fn default_obj_c_src() -> String {
+    "Obj_C".to_string()
+}
+fn default_obj_cpp_src() -> String {
+    "Obj_CPP".to_string()
+}
+fn default_headers() -> String {
+    "include".to_string()
+}
+fn default_build() -> String {
+    "build".to_string()
+}
 
 fn default_paths() -> Paths {
     Paths {
@@ -47,24 +59,34 @@ fn default_paths() -> Paths {
 }
 
 impl Config {
-    /// Load .cforge.toml if it exists, otherwise return defaults.
+    /// Load .cforge.toml from the current directory, otherwise defaults.
     pub fn load() -> Config {
-        if Path::new(CONFIG_FILE).exists() {
-            match fs::read_to_string(CONFIG_FILE) {
-                Ok(content) => match toml::from_str(&content) {
-                    Ok(cfg) => cfg,
-                    Err(e) => {
-                        eprintln!("Warning: failed to parse {}: {}", CONFIG_FILE, e);
-                        Config::default()
-                    }
-                },
+        Config::load_from(Path::new("."))
+    }
+
+    /// Load the .cforge.toml belonging to `dir`. Callers that already work
+    /// against an explicit project root (`build::resolve_target_in`) must
+    /// use this rather than `load()`: reading the config from the process
+    /// working directory while resolving paths under a different root is
+    /// how a function documented as cwd-independent quietly stops being
+    /// cwd-independent.
+    pub fn load_from(dir: &Path) -> Config {
+        let path = dir.join(CONFIG_FILE);
+        if !path.exists() {
+            return Config::default();
+        }
+        match fs::read_to_string(&path) {
+            Ok(content) => match toml::from_str(&content) {
+                Ok(cfg) => cfg,
                 Err(e) => {
-                    eprintln!("Warning: failed to read {}: {}", CONFIG_FILE, e);
+                    eprintln!("Warning: failed to parse {}: {}", path.display(), e);
                     Config::default()
                 }
+            },
+            Err(e) => {
+                eprintln!("Warning: failed to read {}: {}", path.display(), e);
+                Config::default()
             }
-        } else {
-            Config::default()
         }
     }
 
@@ -72,6 +94,15 @@ impl Config {
     pub fn save(&self) {
         let content = toml::to_string_pretty(self).unwrap_or_default();
         crate::platform::write_file(Path::new(CONFIG_FILE), &(content + "\n"));
+    }
+
+    /// The configured build directory. `paths.build` was settable via
+    /// `cforge config set build <dir>` and honored by `init`/`clean`, but
+    /// every command that actually *uses* the directory hardcoded
+    /// "build" — so setting it produced a project whose artifacts landed
+    /// somewhere `clean` then wiped and `package` couldn't find.
+    pub fn build_dir(&self) -> &str {
+        &self.paths.build
     }
 
     /// Get the source directory for a language.
@@ -84,14 +115,11 @@ impl Config {
             _ => "src",
         }
     }
-
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config {
-            paths: default_paths(),
-        }
+        Config { paths: default_paths() }
     }
 }
 
@@ -105,6 +133,14 @@ mod tests {
         assert_eq!(cfg.src_dir("c"), "C");
         assert_eq!(cfg.src_dir("cpp"), "CPP");
         assert_eq!(cfg.src_dir("obj_c"), "Obj_C");
+    }
+
+    #[test]
+    fn build_dir_follows_config() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.build_dir(), "build");
+        cfg.paths.build = "out".to_string();
+        assert_eq!(cfg.build_dir(), "out");
     }
 
     #[test]

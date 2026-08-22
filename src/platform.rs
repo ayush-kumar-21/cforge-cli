@@ -36,7 +36,11 @@ pub fn home_dir() -> PathBuf {
 /// installs via winget) when neither is present.
 pub fn c_compiler() -> &'static str {
     if os() == Os::Windows {
-        if command_exists("gcc") { "gcc" } else { "clang" }
+        if command_exists("gcc") {
+            "gcc"
+        } else {
+            "clang"
+        }
     } else {
         "cc"
     }
@@ -44,7 +48,11 @@ pub fn c_compiler() -> &'static str {
 
 pub fn cxx_compiler() -> &'static str {
     if os() == Os::Windows {
-        if command_exists("g++") { "g++" } else { "clang++" }
+        if command_exists("g++") {
+            "g++"
+        } else {
+            "clang++"
+        }
     } else {
         "c++"
     }
@@ -146,6 +154,17 @@ pub fn write_file(path: &std::path::Path, content: &str) {
     });
 }
 
+/// `write_file`, but never overwrites an existing file. Scaffolding is
+/// re-runnable (`cforge new --ffi rust` over an existing project, a second
+/// `--template` pass), and every generated file here is one the user is
+/// expected to edit — the C ABI header in particular, where a clobber
+/// silently deletes every declaration they added.
+pub fn write_new(path: &std::path::Path, content: &str) {
+    if !path.exists() {
+        write_file(path, content);
+    }
+}
+
 /// `fs::create_dir_all`, or under `--dry-run` prints `+ mkdir -p <path>`
 /// instead of creating anything. The other half of `write_file`'s
 /// dry-run coverage: `cforge new`/`init`/`generate` create directories
@@ -216,10 +235,8 @@ pub struct DetectedCompiler {
 /// different version string and so survive the dedupe as a genuine second
 /// option.
 pub fn detect_compilers() -> Vec<DetectedCompiler> {
-    let mut candidates: Vec<(String, String)> = vec![
-        ("clang".to_string(), "clang++".to_string()),
-        ("gcc".to_string(), "g++".to_string()),
-    ];
+    let mut candidates: Vec<(String, String)> =
+        vec![("clang".to_string(), "clang++".to_string()), ("gcc".to_string(), "g++".to_string())];
     // Homebrew/apt install real GNU GCC as gcc-N; newest first so it wins
     // the dedupe over an older parallel install of the same toolchain.
     for major in (9..=20).rev() {
@@ -352,9 +369,7 @@ pub fn ensure_pkg_manager() -> PkgManager {
                 "Error: winget not found. Update Windows (winget ships with modern Windows 10/11 \
                  via the 'App Installer' package from the Microsoft Store) and re-run."
             ),
-            _ => eprintln!(
-                "Error: no supported package manager found (looked for apt/dnf/yum/pacman/zypper/apk)."
-            ),
+            _ => eprintln!("Error: no supported package manager found (looked for apt/dnf/yum/pacman/zypper/apk)."),
         }
         std::process::exit(1);
     }
@@ -368,27 +383,30 @@ pub fn ensure_pkg_manager() -> PkgManager {
 /// Windows, see vcpkg handling in `add_library` instead — winget is for
 /// tools, not per-project C/C++ dependencies.
 pub fn install_pkg(pkg: &str) {
+    if !install_pkg_ok(pkg) {
+        eprintln!("Error: failed to install package `{pkg}`");
+        std::process::exit(1);
+    }
+}
+
+/// Non-fatal variant: returns whether the install succeeded, so callers with
+/// several candidate package names (`pkgmgr::install_library`) can try the
+/// next one instead of dying on the first miss.
+pub fn install_pkg_ok(pkg: &str) -> bool {
     match ensure_pkg_manager() {
-        PkgManager::Brew => run_or_die("brew", &["install", pkg], "failed to install package"),
-        PkgManager::Apt => {
-            run_or_die("sudo", &["apt-get", "update", "-y"], "apt-get update failed");
-            run_or_die("sudo", &["apt-get", "install", "-y", pkg], "failed to install package");
-        }
-        PkgManager::Dnf => run_or_die("sudo", &["dnf", "install", "-y", pkg], "failed to install package"),
-        PkgManager::Yum => run_or_die("sudo", &["yum", "install", "-y", pkg], "failed to install package"),
-        PkgManager::Zypper => run_or_die("sudo", &["zypper", "install", "-y", pkg], "failed to install package"),
-        PkgManager::Apk => run_or_die("sudo", &["apk", "add", pkg], "failed to install package"),
+        PkgManager::Brew => run("brew", &["install", pkg]),
+        PkgManager::Apt => run("sudo", &["apt-get", "update", "-y"]) && run("sudo", &["apt-get", "install", "-y", pkg]),
+        PkgManager::Dnf => run("sudo", &["dnf", "install", "-y", pkg]),
+        PkgManager::Yum => run("sudo", &["yum", "install", "-y", pkg]),
+        PkgManager::Zypper => run("sudo", &["zypper", "install", "-y", pkg]),
+        PkgManager::Apk => run("sudo", &["apk", "add", pkg]),
         // MSYS2 pacman manages its own prefix and isn't run under sudo (which
         // doesn't exist there); Arch/Linux pacman needs it.
-        PkgManager::Pacman if os() == Os::Windows => {
-            run_or_die("pacman", &["-Sy", "--noconfirm", pkg], "failed to install package")
+        PkgManager::Pacman if os() == Os::Windows => run("pacman", &["-Sy", "--noconfirm", pkg]),
+        PkgManager::Pacman => run("sudo", &["pacman", "-Sy", "--noconfirm", pkg]),
+        PkgManager::Winget => {
+            run("winget", &["install", "-e", "--id", pkg, "--accept-source-agreements", "--accept-package-agreements"])
         }
-        PkgManager::Pacman => run_or_die("sudo", &["pacman", "-Sy", "--noconfirm", pkg], "failed to install package"),
-        PkgManager::Winget => run_or_die(
-            "winget",
-            &["install", "-e", "--id", pkg, "--accept-source-agreements", "--accept-package-agreements"],
-            "failed to install package",
-        ),
         PkgManager::None => unreachable!("ensure_pkg_manager exits before returning None"),
     }
 }
@@ -437,10 +455,20 @@ pub fn ensure_compiler() {
                     run_or_die("sudo", &["apt-get", "update", "-y"], "apt-get update failed");
                     run_or_die("sudo", &["apt-get", "install", "-y", "build-essential"], "compiler install failed");
                 }
-                PkgManager::Dnf => run_or_die("sudo", &["dnf", "install", "-y", "gcc", "gcc-c++", "make"], "compiler install failed"),
-                PkgManager::Yum => run_or_die("sudo", &["yum", "install", "-y", "gcc", "gcc-c++", "make"], "compiler install failed"),
-                PkgManager::Pacman => run_or_die("sudo", &["pacman", "-Sy", "--noconfirm", "base-devel"], "compiler install failed"),
-                PkgManager::Zypper => run_or_die("sudo", &["zypper", "install", "-y", "gcc", "gcc-c++", "make"], "compiler install failed"),
+                PkgManager::Dnf => {
+                    run_or_die("sudo", &["dnf", "install", "-y", "gcc", "gcc-c++", "make"], "compiler install failed")
+                }
+                PkgManager::Yum => {
+                    run_or_die("sudo", &["yum", "install", "-y", "gcc", "gcc-c++", "make"], "compiler install failed")
+                }
+                PkgManager::Pacman => {
+                    run_or_die("sudo", &["pacman", "-Sy", "--noconfirm", "base-devel"], "compiler install failed")
+                }
+                PkgManager::Zypper => run_or_die(
+                    "sudo",
+                    &["zypper", "install", "-y", "gcc", "gcc-c++", "make"],
+                    "compiler install failed",
+                ),
                 PkgManager::Apk => run_or_die("sudo", &["apk", "add", "build-base"], "compiler install failed"),
                 _ => unreachable!(),
             }
@@ -508,7 +536,11 @@ pub fn vcpkg_root() -> PathBuf {
 
 pub fn vcpkg_exe() -> PathBuf {
     let base = vcpkg_root();
-    if os() == Os::Windows { base.join("vcpkg.exe") } else { base.join("vcpkg") }
+    if os() == Os::Windows {
+        base.join("vcpkg.exe")
+    } else {
+        base.join("vcpkg")
+    }
 }
 
 pub fn vcpkg_toolchain_file() -> PathBuf {
@@ -540,4 +572,27 @@ pub fn ensure_vcpkg() {
     );
     let bootstrap = root.join("bootstrap-vcpkg.bat");
     run_or_die(bootstrap.to_str().unwrap_or_default(), &[], "failed to bootstrap vcpkg");
+}
+
+/// Test-only scratch-directory helper. `set_current_dir` is process-global
+/// but cargo runs tests on parallel threads, so every chdir-ing test must
+/// serialize on the same lock — two of them racing is what made the
+/// toolchain tests fail intermittently. Poisoning is ignored: a panicking
+/// test leaves the CWD wrong for the next one, which is a test bug to
+/// surface, not a reason to fail every later test.
+#[cfg(test)]
+pub fn in_scratch_dir<T>(label: &str, f: impl FnOnce() -> T) -> T {
+    use std::sync::{Mutex, OnceLock};
+    static CWD_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let _guard = CWD_LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(|e| e.into_inner());
+
+    let dir = std::env::temp_dir().join(format!("cforge_test_{label}_{}", std::process::id()));
+    std::fs::remove_dir_all(&dir).ok();
+    std::fs::create_dir_all(&dir).unwrap();
+    let original = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&dir).unwrap();
+    let result = f();
+    std::env::set_current_dir(original).unwrap();
+    std::fs::remove_dir_all(&dir).ok();
+    result
 }

@@ -30,11 +30,7 @@ fn print_platform_line() {
         Os::Windows => "Windows".to_string(),
         Os::Unknown => std::env::consts::OS.to_string(),
     };
-    let detail = if os() == Os::Macos {
-        run_capture("sw_vers", &["-productVersion"])
-    } else {
-        None
-    };
+    let detail = if os() == Os::Macos { run_capture("sw_vers", &["-productVersion"]) } else { None };
     match detail {
         Some(v) => println!("platform   {os_name} {v} ({})", std::env::consts::ARCH),
         None => println!("platform   {os_name} ({})", std::env::consts::ARCH),
