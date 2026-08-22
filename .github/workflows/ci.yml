@@ -50,21 +50,15 @@ jobs:
       # passing --test-threads=1, so this runs the same way it does locally.
       - run: cargo test --locked
 
-      # The Linux Objective-C tier is GNUstep, which is not on the runner
-      # image — these are the same packages `cforge toolchain install obj_c`
-      # installs. Without them the objc/objcpp cases in the next step cannot
-      # build anything, and the tier the README advertises goes untested.
-      - if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y gobjc gobjc++ gnustep-devel
-
       # tests/scaffold_and_build.rs: actually scaffolds *and builds* a real
       # project for every language/template combination via the compiled
       # cforge binary. The unit tests above never invoke cmake or a real
       # compiler, so without this, a template that no longer compiles would
       # still go green. #[ignore]'d in the test file (slow, needs a real
       # toolchain) — run explicitly here instead. This is also what
-      # actually exercises the Windows (Winsock/clang-via-winget) and
-      # Linux/GNUstep code paths, which nothing else in CI touches.
+      # actually exercises the Windows (Winsock/clang-via-winget) code
+      # paths, which nothing else in CI touches. The Objective-C cases are
+      # macOS-only, matching where the language is supported.
       - run: cargo test --locked --test scaffold_and_build -- --ignored --test-threads=1
 
   # Two gates nothing above covers. Both are cheap and Ubuntu-only: neither

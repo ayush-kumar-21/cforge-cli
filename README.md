@@ -39,24 +39,20 @@ you. cforge is a friendlier layer on top of CMake, not a replacement for it.
 CMake, Ninja on Windows, a package manager — the first time a command actually
 needs it. You do not have to set up a toolchain by hand first.
 
-| Platform | Status |
-|---|---|
-| macOS (Apple Silicon & Intel) | Fully supported |
-| Linux (any distro) | Fully supported |
-| Windows 10/11 | Fully supported — native binary, no WSL, MSYS2, or bash needed |
+| Platform | C / C++ | Objective-C / Objective-C++ |
+|---|---|---|
+| macOS (Apple Silicon & Intel) | Yes | Yes |
+| Linux (any distro) | Yes | No — macOS only |
+| Windows 10/11 | Yes — native binary, no WSL, MSYS2, or bash needed | No — macOS only |
 
 **Languages**: C, C++, Objective-C, and Objective-C++. A new project is
 single-language (C by default); use `--lang` to enable more. There is also a
 `new-rust-app` shortcut that hands off to `cargo` — cforge does not build Rust
 projects, it just gets you started the same way.
 
-Objective-C and Objective-C++ are fully supported on macOS. On Linux they
-build through GNUstep with real caveats: no Apple frameworks, ARC requires
-`--runtime libobjc2`, and **the Objective-C starter templates do not compile
-there** — they use Objective-C 2.0 (`@autoreleasepool`), which GCC's
-Objective-C frontend does not implement. Hand-written Objective-C targeting
-that frontend builds fine. On Windows they are unavailable entirely, since
-Objective-C needs either Apple's runtime or GNUstep and neither exists there.
+**Objective-C and Objective-C++ require macOS.** They are Apple platform
+languages, and cforge treats them that way: on Linux and Windows they are
+rejected up front rather than half-working. C and C++ build everywhere.
 
 ---
 
@@ -207,7 +203,7 @@ Pick one by language-specific command:
 ```sh
 cforge new-c-app myapp                    # arrow-key menu of templates
 cforge new-cpp-app myapp --template cli   # or name one directly
-cforge new-objc-app myapp                 # macOS, or Linux via GNUstep
+cforge new-objc-app myapp                 # macOS only
 cforge new-objcpp-app myapp
 cforge new-rust-app myapp                 # hands off to cargo new
 ```
@@ -282,10 +278,10 @@ longer troubleshooting table.
 - **Windows uses LLVM `clang`/`clang++`**, installed automatically via `winget`
   along with `ninja` as the build backend, rather than MSVC. This avoids
   requiring a multi-gigabyte Visual Studio install just to compile.
-- **Objective-C on Linux** goes through GNUstep. Apple frameworks are not
-  available, and ARC needs `--runtime libobjc2`. On Windows, cforge never asks
-  CMake for an Objective-C compiler at all, so plain C/C++ projects build
-  cleanly everywhere.
+- **Objective-C is macOS-only.** cforge never asks CMake for an Objective-C
+  compiler off macOS, so plain C/C++ projects configure cleanly everywhere,
+  and `cforge new-objc-app` fails immediately with a clear message rather
+  than producing a project that cannot build.
 - **Everything else installs itself.** A package manager, a C/C++ compiler,
   CMake, Ninja on Windows — cforge sets these up the first time a command needs
   them.

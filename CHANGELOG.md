@@ -1,5 +1,31 @@
 # Changelog
 
+## Unreleased
+
+**Objective-C and Objective-C++ are now macOS-only.** The Linux tier, which
+built through GNUstep, is removed rather than kept as a documented caveat: it
+did not work. GNUstep on Linux compiles with GCC's Objective-C frontend, which
+predates Objective-C 2.0 and rejects `@autoreleasepool`, array subscripting,
+and dot-syntax — so the very templates `cforge new-objc-app` scaffolds could
+not be built there. Pointing CMake at clang instead fails differently, on
+GNUstep's headers being built against GCC's `libobjc`.
+
+`cforge new-objc-app` and `--lang obj_c` now exit with a clear message off
+macOS instead of producing a project that cannot build. C and C++ are
+unaffected and continue to build on all three platforms.
+
+Consequences:
+
+- `cforge toolchain install obj_c` is macOS-only and installs Apple's Command
+  Line Tools. The `--runtime gnustep|libobjc2` flag is gone, along with the
+  `.cforge_objc_runtime` file it wrote.
+- The generated `CMakeLists.txt` no longer probes for `gnustep-config` or
+  links GNUstep's base library; Objective-C targets link Apple's Foundation.
+- `LangCapability` lost its `Caveats` tier, which nothing produces any more.
+- The Objective-C templates use idiomatic Objective-C 2.0 again — lightweight
+  generics, subscripting, dot-syntax — since no GCC frontend has to accept
+  them.
+
 ## 0.2.0 — 2026-08-22
 
 **Known limitations**, all surfaced by running the integration tests on three

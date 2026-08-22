@@ -9,42 +9,42 @@ const KNOWN_LANGS: &[&str] = &["c", "cpp", "obj_c", "obj_cpp"];
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LangCapability {
     Supported,
-    /// Allowed, but with rough edges the caller may want to warn about
-    /// (Linux Obj-C/Obj-C++ via GNUstep: no Apple frameworks, ARC needs
-    /// --runtime libobjc2).
-    Caveats,
     Unsupported,
 }
 
-/// Mirrors the bash version's three-tier `lang_capability()`: c/cpp work
-/// everywhere; obj_c/obj_cpp are fully supported on macOS, work with
-/// caveats on Linux (GNUstep), and have no viable toolchain elsewhere
-/// (notably Windows). Panics on an unknown language — callers are
-/// expected to have already matched against `KNOWN_LANGS`.
+/// c/cpp work everywhere; obj_c/obj_cpp are macOS-only. Panics on an
+/// unknown language — callers are expected to have already matched against
+/// `KNOWN_LANGS`.
+///
+/// There used to be a third tier for Linux, where Objective-C nominally
+/// worked through GNUstep. In practice it did not: GNUstep on Linux
+/// compiles with GCC's Objective-C frontend, which predates Objective-C
+/// 2.0 and rejects `@autoreleasepool`, array subscripting, and dot-syntax
+/// — so the templates cforge itself scaffolds could not be built. Pointing
+/// CMake at clang instead fails differently, on GNUstep's headers being
+/// built against GCC's libobjc. Rather than advertise a tier that does not
+/// work, Objective-C is macOS-only and says so up front.
 pub fn lang_capability(lang: &str) -> LangCapability {
     match lang {
         "c" | "cpp" => LangCapability::Supported,
         "obj_c" | "obj_cpp" => match os() {
             Os::Macos => LangCapability::Supported,
-            Os::Linux => LangCapability::Caveats,
             _ => LangCapability::Unsupported,
         },
         other => unreachable!("lang_capability called with unknown language '{other}'"),
     }
 }
 
-/// True if this platform has *any* viable obj_c/obj_cpp toolchain path
-/// (macOS or Linux/GNUstep) — used to gate source-file discovery and
-/// CMakeLists.txt generation, which need a yes/no rather than the full
-/// three-tier capability.
+/// True if this platform can build obj_c/obj_cpp at all — used to gate
+/// source-file discovery and CMakeLists.txt generation, which want a
+/// yes/no rather than a per-language answer.
 pub fn objc_capable_platform() -> bool {
-    matches!(os(), Os::Macos | Os::Linux)
+    os() == Os::Macos
 }
 
 /// Platform-supported languages, used as the default set when nothing is
-/// pinned in langs.txt. Matches the bash version's
-/// `default_langs_for_platform()`: every known language except on
-/// Windows, where obj_c/obj_cpp have no viable toolchain at all.
+/// pinned in langs.txt: every known language on macOS, just c/cpp
+/// everywhere else.
 pub fn all_langs() -> &'static [&'static str] {
     if objc_capable_platform() {
         &["c", "cpp", "obj_c", "obj_cpp"]
@@ -59,8 +59,8 @@ pub fn validate_lang(lang: &str) {
     }
     if lang_capability(lang) == LangCapability::Unsupported {
         eprintln!("Error: {lang} is not supported on this platform.");
-        eprintln!("  Objective-C and Objective-C++ are Apple platform languages;");
-        eprintln!("  full support requires macOS. Linux has partial support via GNUstep.");
+        eprintln!("  Objective-C and Objective-C++ are Apple platform languages and");
+        eprintln!("  require macOS.");
         eprintln!("  Supported here: c, cpp");
         std::process::exit(3);
     }
@@ -318,14 +318,32 @@ mod capability_tests {
         assert_eq!(all_langs().contains(&"obj_cpp"), objc_capable_platform());
     }
 
-    /// c/cpp are always Supported; obj_c/obj_cpp are never flatly
-    /// Unsupported except where there's truly no toolchain path (Windows).
+    /// c/cpp are always Supported; obj_c/obj_cpp are Supported only on
+    /// macOS.
     #[test]
     fn capability_tiers_are_internally_consistent() {
         assert_eq!(lang_capability("c"), LangCapability::Supported);
         assert_eq!(lang_capability("cpp"), LangCapability::Supported);
         assert_eq!(lang_capability("obj_c") == LangCapability::Unsupported, !objc_capable_platform());
         assert_eq!(lang_capability("obj_cpp") == LangCapability::Unsupported, !objc_capable_platform());
+    }
+
+    /// Pins the rule itself, not just internal agreement: the assertions
+    /// above are all phrased in terms of `objc_capable_platform()`, so they
+    /// would keep passing if it started answering something else entirely.
+    /// This is the one that fails on Linux and Windows CI if Objective-C
+    /// stops being macOS-only.
+    #[test]
+    fn objc_is_macos_only() {
+        assert_eq!(objc_capable_platform(), cfg!(target_os = "macos"));
+
+        let expected = if cfg!(target_os = "macos") { LangCapability::Supported } else { LangCapability::Unsupported };
+        assert_eq!(lang_capability("obj_c"), expected);
+        assert_eq!(lang_capability("obj_cpp"), expected);
+
+        // c/cpp must stay unaffected by the Objective-C rule on every host.
+        assert!(all_langs().contains(&"c"));
+        assert!(all_langs().contains(&"cpp"));
     }
 
     /// `cforge new` with no --lang is single-language (just c), not the

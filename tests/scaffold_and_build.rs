@@ -117,19 +117,10 @@ macro_rules! c_family_tests {
 
 c_family_tests!(c, "new-c-app");
 c_family_tests!(cpp, "new-cpp-app");
-// macOS only, for two different reasons.
-//
-// Windows has no viable Objective-C toolchain at all (see project.rs's
-// LangCapability); `new-objc-app`/`new-objcpp-app` exit(3) there by design.
-//
-// Linux is a known gap rather than a design decision. The templates use
-// Objective-C 2.0 (@autoreleasepool), which GCC's Objective-C frontend does
-// not implement, and Debian's GNUstep is built against GCC's libobjc, so
-// pointing CMake at clang instead fails differently: clang cannot find
-// <objc/objc.h>. Making this tier work means GNUstep with libobjc2 and the
-// matching -fobjc-runtime flags, which is its own piece of work, not a
-// tweak. Building Objective-C *by hand* on Linux still works, as it always
-// did; it is the scaffolded templates that need a 2.0 frontend.
+// Objective-C and Objective-C++ are macOS-only (project.rs's
+// lang_capability), so these run only there. `new-objc-app` /
+// `new-objcpp-app` exit(3) on every other platform by design, which the
+// unit tests cover.
 c_family_tests!(objc, "new-objc-app", #[cfg(target_os = "macos")]);
 c_family_tests!(objcpp, "new-objcpp-app", #[cfg(target_os = "macos")]);
 

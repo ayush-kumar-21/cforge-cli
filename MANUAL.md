@@ -179,8 +179,8 @@ cforge new-cpp-app myapp                    # menu
 cforge new-cpp-app myapp --template cli     # no menu
 ```
 
-`new-objc-app` and `new-objcpp-app` follow the usual platform rules: full
-support on macOS, GNUstep caveats on Linux, unsupported on Windows.
+`new-objc-app` and `new-objcpp-app` require macOS; they exit with an error
+on Linux and Windows.
 
 #### `cforge new-rust-app <name> [options]`
 
@@ -287,12 +287,11 @@ Installs a compiler or runtime for a language.
 |---|---|
 | `--compiler <name>` | `gcc`, `clang`, `mingw`, `msvc`, or `apple-clang` (C/C++ only) |
 | `--version <v>` | Compiler version, where the package manager supports it |
-| `--runtime <r>` | Objective-C on Linux: `gnustep` (default) or `libobjc2` |
-| `--wait` | Objective-C on macOS: block until the Command Line Tools installer finishes |
+| `--wait` | Objective-C: block until the Command Line Tools installer finishes |
 
 ```sh
 cforge toolchain install cpp --compiler gcc --version 14
-cforge toolchain install obj_c --runtime libobjc2      # Linux, for ARC support
+cforge toolchain install obj_c                         # macOS Command Line Tools
 ```
 
 #### `cforge toolchain use <lang> <compiler>`
@@ -325,7 +324,7 @@ cforge lang list              # show what is enabled
 ```
 
 Valid values: `c`, `cpp`, `obj_c`, `obj_cpp`. Objective-C and Objective-C++
-are rejected on Windows.
+are rejected anywhere but macOS.
 
 ---
 
@@ -479,10 +478,8 @@ All five templates exist for C, C++, Objective-C, and Objective-C++, each
 implemented in that language's own idioms rather than one language's template
 with a different file extension.
 
-> **Objective-C templates are macOS-only in practice.** They use Objective-C
-> 2.0 constructs such as `@autoreleasepool`, which GCC's Objective-C frontend
-> — what GNUstep on Linux compiles with — does not implement. Objective-C you
-> write yourself against that frontend still builds on Linux. Rust has its own equivalents through
+> **The Objective-C templates require macOS**, as does Objective-C support
+> generally. They target Apple's clang and Foundation. Rust has its own equivalents through
 `new-rust-app`.
 
 | Template | Contents |
@@ -578,7 +575,8 @@ echo every command cforge runs underneath.
 | Wrong compiler being used | `cforge toolchain list`, then `cforge toolchain use <lang> <compiler>` |
 | A pinned standard is rejected | `cforge std list` shows what your compiler actually supports; `cforge std set <key> latest` |
 | Editor sees no include paths | `cforge compdb` |
-| Objective-C fails to build on Linux | Install the runtime: `cforge toolchain install obj_c`. ARC needs `--runtime libobjc2`, and Apple frameworks are unavailable. Note the scaffolded templates use Objective-C 2.0 and will not compile under GCC's Objective-C frontend — see [Platform notes](#platform-notes) |
+| `obj_c is not supported on this platform` | Objective-C and Objective-C++ require macOS. Use C or C++ instead |
+| Objective-C fails to build on macOS | Install Apple's Command Line Tools: `cforge toolchain install obj_c` |
 | `cforge test` finds no tests | Tests come from directories ending in `_test`. Check the directory name, then `cforge build` before `cforge test` |
 
 **Library name mismatches** are the most common failure. The name you pass to

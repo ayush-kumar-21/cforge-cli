@@ -6,9 +6,7 @@
 //! `-DCMAKE_C_COMPILER=<compiler>` / `-DCMAKE_CXX_COMPILER=<compiler>` to
 //! cmake for c/cpp entries.
 use crate::color;
-use crate::platform::{
-    self, command_exists, ensure_pkg_manager, install_pkg, install_pkg_ok, os, run_or_die, Os, PkgManager,
-};
+use crate::platform::{self, command_exists, ensure_pkg_manager, install_pkg, os, run_or_die, Os, PkgManager};
 use crate::project::validate_lang;
 use std::fs;
 use std::io::{IsTerminal, Write};
@@ -156,64 +154,6 @@ fn install_objc_macos(wait: bool) {
     platform::wait_for_xcode_clt();
 }
 
-/// Installs the first of `candidates` that the package manager accepts.
-///
-/// GNUstep and the GNU Objective-C compiler are spelled differently on
-/// every distro, and `install_pkg` is fatal on a miss — so the old fixed
-/// list killed `toolchain install obj_c` outright on Ubuntu, where
-/// `gnustep-base` simply does not exist as a package. Reports which name
-/// worked, since that is the thing worth knowing when a build later fails.
-fn install_first_available(role: &str, candidates: &[&str]) -> bool {
-    for pkg in candidates {
-        if install_pkg_ok(pkg) {
-            platform::status(&format!("installed {role}: {pkg}"));
-            return true;
-        }
-    }
-    eprintln!("Error: could not install {role} — tried: {}", candidates.join(", "));
-    eprintln!("Install it manually with your distro's package manager and re-run.");
-    false
-}
-
-fn install_objc_linux(runtime: &str) {
-    ensure_pkg_manager();
-    match runtime {
-        "gnustep" => {
-            // Debian/Ubuntu: gobjc / gobjc++ + gnustep-devel (which pulls
-            // in libgnustep-base-dev). Fedora: gcc-objc / gcc-objc++ +
-            // gnustep-base-devel. Arch: gcc-objc + gnustep-base.
-            //
-            // Both compilers are installed regardless of which language was
-            // asked for: obj_c and obj_cpp both land here, and installing
-            // only gobjc left `toolchain install obj_cpp` reporting success
-            // while CMake still found no Objective-C++ compiler.
-            let objc = install_first_available("Objective-C compiler", &["gobjc", "gcc-objc"]);
-            let objcpp = install_first_available("Objective-C++ compiler", &["gobjc++", "gcc-objc++"]);
-            let base = install_first_available(
-                "GNUstep base",
-                &["gnustep-devel", "gnustep-base-devel", "libgnustep-base-dev", "gnustep-base"],
-            );
-            if !objc || !objcpp || !base {
-                std::process::exit(1);
-            }
-        }
-        "libobjc2" => {
-            install_pkg("clang");
-            let base = install_first_available("libobjc2", &["libobjc2", "gnustep-libobjc2"]);
-            if !base {
-                std::process::exit(1);
-            }
-            platform::status("installed: clang, libobjc2");
-        }
-        other => crate::usage_error(&format!("unknown --runtime '{other}' (expected: gnustep|libobjc2)")),
-    }
-    platform::write_file(Path::new(".cforge_objc_runtime"), &format!("{runtime}\n"));
-    platform::status("note: Objective-C on Linux uses the GNUstep runtime.");
-    platform::status("      Apple frameworks (Cocoa, AppKit, UIKit) are unavailable.");
-    platform::status("      ARC requires --runtime libobjc2.");
-    platform::status("      Run 'cforge info' to see this again.");
-}
-
 fn install_native(lang: &str, compiler: Option<&str>, version: Option<&str>) {
     let Some(compiler) = compiler else {
         crate::platform::ensure_compiler();
@@ -270,22 +210,20 @@ pub fn resolve_binary(lang: &str, family: &str) -> String {
     }
 }
 
-pub fn install(lang: &str, compiler: Option<&str>, version: Option<&str>, runtime: &str, wait: bool) {
+pub fn install(lang: &str, compiler: Option<&str>, version: Option<&str>, wait: bool) {
     validate_lang(lang);
     match lang {
+        // validate_lang already exited if this is not macOS: obj_c/obj_cpp
+        // are Unsupported everywhere else, so there is no second branch.
         "obj_c" | "obj_cpp" => {
-            if os() == Os::Macos {
-                if compiler.is_some() {
-                    eprintln!("Error: --compiler is not valid for {lang} on macOS");
-                    eprintln!("  Objective-C on macOS requires apple-clang; it is the only toolchain");
-                    eprintln!("  that links Foundation and AppKit. Homebrew gcc provides gobjc but");
-                    eprintln!("  cannot link Apple frameworks.");
-                    std::process::exit(2);
-                }
-                install_objc_macos(wait);
-            } else {
-                install_objc_linux(runtime);
+            if compiler.is_some() {
+                eprintln!("Error: --compiler is not valid for {lang}");
+                eprintln!("  Objective-C requires apple-clang; it is the only toolchain that");
+                eprintln!("  links Foundation and AppKit. Homebrew gcc provides gobjc but");
+                eprintln!("  cannot link Apple frameworks.");
+                std::process::exit(2);
             }
+            install_objc_macos(wait);
         }
         "c" | "cpp" => install_native(lang, compiler, version),
         _ => unreachable!("validate_lang already rejected anything else"),

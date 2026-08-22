@@ -1,10 +1,11 @@
 //! Objective-C templates: idiomatic Foundation (NSString/NSArray/NSLog,
 //! @autoreleasepool, @interface/@implementation classes) — see
-//! `templates/mod.rs`. Deliberately avoids Blocks/GCD (dispatch_once):
-//! cforge's obj_c support extends to Linux via GNUstep with caveats
-//! already (project.rs's `LangCapability::Caveats`), and those aren't
-//! reliably available there, so plain Objective-C keeps every template
-//! buildable on both tiers.
+//! `templates/mod.rs`.
+//!
+//! Objective-C is macOS-only (project.rs's `lang_capability`), so these
+//! target Apple's clang and Foundation without hedging. Blocks/GCD are
+//! still avoided, but for readability rather than portability: a starter
+//! template is clearer without dispatch_once in it.
 use super::{c, scaffold_files};
 use crate::config::Config;
 use std::path::Path;
@@ -27,9 +28,8 @@ int main(int argc, char *argv[]) {
             fprintf(stderr, "Usage: %s <command> [args...]\n", argv[0]);
             return 1;
         }
-        NSMutableArray *args = [NSMutableArray array];
-        int i;
-        for (i = 2; i < argc; i++) {
+        NSMutableArray<NSString *> *args = [NSMutableArray array];
+        for (int i = 2; i < argc; i++) {
             [args addObject:[NSString stringWithUTF8String:argv[i]]];
         }
         return RunCommand([NSString stringWithUTF8String:argv[1]], args);
@@ -43,17 +43,13 @@ const CLI_COMMANDS_H: &str = r#"#pragma once
 // Runs the named command with the given arguments. Returns the process
 // exit code (0 on success, 1 for an unknown command). Add a new command
 // by extending kCommands in commands.m.
-//
-// Plain NSArray rather than NSArray<NSString *>: lightweight generics are
-// a Clang extension, and Objective-C on Linux goes through GNUstep with
-// GCC's frontend, which rejects them outright.
-int RunCommand(NSString *name, NSArray *args);
+int RunCommand(NSString *name, NSArray<NSString *> *args);
 "#;
 
 const CLI_COMMANDS_M: &str = r#"#import "commands.h"
 #include <string.h>
 
-typedef int (*CommandFn)(NSArray *args);
+typedef int (*CommandFn)(NSArray<NSString *> *args);
 
 typedef struct {
     const char *name;
@@ -61,19 +57,13 @@ typedef struct {
     CommandFn fn;
 } Command;
 
-static int CmdGreet(NSArray *args) {
-    // [args objectAtIndex:] rather than args[0], and [args count] rather
-    // than args.count: subscripting and dot-syntax on a plain NSArray are
-    // Clang extensions, and Objective-C on Linux compiles through GCC.
-    NSString *who = @"world";
-    if ([args count] > 0) {
-        who = [args objectAtIndex:0];
-    }
+static int CmdGreet(NSArray<NSString *> *args) {
+    NSString *who = args.count > 0 ? args[0] : @"world";
     NSLog(@"Hello, %@!", who);
     return 0;
 }
 
-static int CmdVersion(NSArray *args) {
+static int CmdVersion(NSArray<NSString *> *args) {
     (void)args;
     printf("0.1.0\n");
     return 0;
@@ -85,19 +75,15 @@ static const Command kCommands[] = {
 };
 static const NSUInteger kCommandCount = sizeof(kCommands) / sizeof(kCommands[0]);
 
-int RunCommand(NSString *name, NSArray *args) {
-    // Loop counters declared up front: GCC compiles .m files in C89 mode
-    // unless CMAKE_OBJC_STANDARD resolves to something newer, and it does
-    // not for every GCC/CMake pairing. Declaring here builds everywhere.
-    NSUInteger i;
-    const char *cName = [name UTF8String];
-    for (i = 0; i < kCommandCount; i++) {
+int RunCommand(NSString *name, NSArray<NSString *> *args) {
+    const char *cName = name.UTF8String;
+    for (NSUInteger i = 0; i < kCommandCount; i++) {
         if (strcmp(cName, kCommands[i].name) == 0) {
             return kCommands[i].fn(args);
         }
     }
     fprintf(stderr, "Unknown command '%s'. Available commands:\n", cName);
-    for (i = 0; i < kCommandCount; i++) {
+    for (NSUInteger i = 0; i < kCommandCount; i++) {
         fprintf(stderr, "  %s - %s\n", kCommands[i].name, kCommands[i].description);
     }
     return 1;

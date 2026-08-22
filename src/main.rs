@@ -31,8 +31,8 @@ pub fn usage() -> ! {
     );
     row("new-c-app", "<name> [opts]", "Scaffold a C project; picks a template from a menu unless --template is given");
     row("new-cpp-app", "<name> [opts]", "Same as new-c-app, for C++");
-    row("new-objc-app", "<name> [opts]", "Same as new-c-app, for Objective-C (macOS full, Linux/GNUstep caveats)");
-    row("new-objcpp-app", "<name> [opts]", "Same as new-c-app, for Objective-C++ (macOS full, Linux/GNUstep caveats)");
+    row("new-objc-app", "<name> [opts]", "Same as new-c-app, for Objective-C (macOS only)");
+    row("new-objcpp-app", "<name> [opts]", "Same as new-c-app, for Objective-C++ (macOS only)");
     row(
         "new-rust-app",
         "<name> [opts]",
@@ -100,7 +100,7 @@ pub fn usage() -> ! {
     row("--no-color", "", "Disable ANSI color (also respects NO_COLOR)");
     row("--dry-run", "", "Print actions (including local file writes) without executing them");
     println!();
-    println!("lang = c|cpp|obj_c|obj_cpp (obj_c/obj_cpp: full support on macOS, GNUstep caveats on Linux, unsupported on Windows)");
+    println!("lang = c|cpp|obj_c|obj_cpp (obj_c/obj_cpp are macOS-only; c/cpp build everywhere)");
     println!("std keys = c|cxx|objc|objcpp (same four languages, spelled to match CMAKE_<X>_STANDARD)");
     println!();
     println!("Run 'cforge new <name>' to scaffold a new project directory, or 'cforge init' to use the current directory as-is.");
@@ -188,9 +188,8 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
              npm-create-style shortcut for 'cforge new': the language is fixed by which\n\
              command you run (no --lang needed). If --template isn't given and this is\n\
              an interactive terminal, an arrow-key menu picks one (or 'none' for a bare\n\
-             project) — same template list as 'cforge new -h'. obj_c/obj_cpp still\n\
-             follow the usual platform rules (full on macOS, Linux/GNUstep caveats,\n\
-             unsupported on Windows).",
+             project) — same template list as 'cforge new -h'. obj_c/obj_cpp are\n\
+             macOS-only and exit(3) elsewhere.",
         ),
         ("new-rust-app", _) => Some(
             "Usage: cforge new-rust-app <name> [--template <name>] | [cargo-new options...]\n\n\
@@ -247,12 +246,12 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
              against what the installed compiler actually supports.",
         ),
         ("toolchain", Some("install")) => Some(
-            "Usage: cforge toolchain install <lang> [--compiler <name>] [--version <v>] [--runtime <r>] [--wait]\n\n\
-             Installs a compiler/runtime for <lang> (c|cpp|obj_c|obj_cpp).\n\
+            "Usage: cforge toolchain install <lang> [--compiler <name>] [--version <v>] [--wait]\n\n\
+             Installs a compiler for <lang> (c|cpp|obj_c|obj_cpp).\n\
              --compiler <gcc|clang|mingw|msvc|apple-clang>  (c/cpp only)\n\
              --version <v>       Compiler version, where the package manager supports it\n\
-             --runtime <r>       obj_c/obj_cpp on Linux: gnustep|libobjc2 (default gnustep)\n\
-             --wait              obj_c/obj_cpp on macOS: block until the CLT installer finishes",
+             --wait              obj_c/obj_cpp: block until the CLT installer finishes\n\n\
+             obj_c/obj_cpp are macOS-only and install via Apple's Command Line Tools.",
         ),
         ("toolchain", Some("use")) => Some(
             "Usage: cforge toolchain use <lang> <compiler>\n\n\
@@ -621,7 +620,6 @@ fn toolchain_install(args: &[String]) {
     let lang = args.first().map(|s| s.as_str()).unwrap_or_else(|| usage_error("toolchain install requires a language"));
     let mut compiler = None;
     let mut version = None;
-    let mut runtime = "gnustep";
     let mut wait = false;
     let mut i = 1;
     while i < args.len() {
@@ -634,16 +632,12 @@ fn toolchain_install(args: &[String]) {
                 i += 1;
                 version = args.get(i).map(|s| s.as_str());
             }
-            "--runtime" => {
-                i += 1;
-                runtime = args.get(i).map(|s| s.as_str()).unwrap_or("gnustep");
-            }
             "--wait" => wait = true,
             _ => {}
         }
         i += 1;
     }
-    toolchain::install(lang, compiler, version, runtime, wait);
+    toolchain::install(lang, compiler, version, wait);
 }
 
 fn set_standard(args: &[String]) {

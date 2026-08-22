@@ -212,21 +212,21 @@ endif()
 
 # Objective-C is enabled here rather than in project() above, so a project
 # that does not use it never makes CMake look for a compiler that may not
-# exist. Listing OBJC in project() failed configure outright on any Linux
-# box without gobjc/GNUstep -- including for projects containing no
+# exist. Listing OBJC in project() failed configure outright on any machine
+# without an Objective-C compiler -- including for projects containing no
 # Objective-C at all, which is most of them.
 #
-# check_language probes instead of hard-failing, because "Linux" does not
-# imply an Objective-C compiler the way macOS does: GNUstep is an explicit
-# install. A project that asked for obj_c on a machine that cannot build it
-# gets a warning naming the fix, not a CMake stack trace.
+# check_language probes instead of hard-failing, so a project whose
+# langs.txt asks for obj_c on a non-Apple machine (a checkout of a macOS
+# project, say) reports what is wrong and skips those sources, rather than
+# dying in a CMake stack trace.
 include(CheckLanguage)
 if("obj_c" IN_LIST ENABLED_LANGS)
     check_language(OBJC)
     if(CMAKE_OBJC_COMPILER)
         enable_language(OBJC)
     else()
-        message(WARNING "No Objective-C compiler found; skipping ${CFORGE_OBJ_C_SRC}/. Run 'cforge toolchain install obj_c'.")
+        message(WARNING "No Objective-C compiler found; skipping ${CFORGE_OBJ_C_SRC}/. Objective-C requires macOS.")
         list(REMOVE_ITEM ENABLED_LANGS "obj_c")
     endif()
 endif()
@@ -235,7 +235,7 @@ if("obj_cpp" IN_LIST ENABLED_LANGS)
     if(CMAKE_OBJCXX_COMPILER)
         enable_language(OBJCXX)
     else()
-        message(WARNING "No Objective-C++ compiler found; skipping ${CFORGE_OBJ_CPP_SRC}/. Run 'cforge toolchain install obj_cpp'.")
+        message(WARNING "No Objective-C++ compiler found; skipping ${CFORGE_OBJ_CPP_SRC}/. Objective-C++ requires macOS.")
         list(REMOVE_ITEM ENABLED_LANGS "obj_cpp")
     endif()
 endif()
@@ -285,28 +285,10 @@ function(link_extra_libs exec_name needs_foundation)
         # so linking it into every target is harmless for the rest.
         target_link_libraries(${exec_name} ws2_32)
     endif()
+    # Objective-C is macOS-only, so Foundation is Apple's Foundation --
+    # there is no GNUstep fallback to pick between.
     if(needs_foundation)
-        if(APPLE)
-            target_link_libraries(${exec_name} "-framework Foundation")
-        else()
-            # Linux Obj-C/Obj-C++ has no Foundation; GNUstep's base
-            # library is the closest equivalent. `cforge toolchain
-            # install obj_c` (Linux) installs gnustep-base and
-            # gnustep-config alongside it.
-            find_program(GNUSTEP_CONFIG gnustep-config)
-            if(GNUSTEP_CONFIG)
-                execute_process(COMMAND ${GNUSTEP_CONFIG} --objc-flags
-                    OUTPUT_VARIABLE GNUSTEP_OBJC_FLAGS OUTPUT_STRIP_TRAILING_WHITESPACE)
-                execute_process(COMMAND ${GNUSTEP_CONFIG} --base-libs
-                    OUTPUT_VARIABLE GNUSTEP_BASE_LIBS OUTPUT_STRIP_TRAILING_WHITESPACE)
-                separate_arguments(GNUSTEP_OBJC_FLAGS_LIST UNIX_COMMAND "${GNUSTEP_OBJC_FLAGS}")
-                separate_arguments(GNUSTEP_BASE_LIBS_LIST UNIX_COMMAND "${GNUSTEP_BASE_LIBS}")
-                target_compile_options(${exec_name} PRIVATE ${GNUSTEP_OBJC_FLAGS_LIST})
-                target_link_libraries(${exec_name} ${GNUSTEP_BASE_LIBS_LIST})
-            else()
-                message(WARNING "gnustep-config not found; ${exec_name} will not link GNUstep base. Run 'cforge toolchain install obj_c' first.")
-            endif()
-        endif()
+        target_link_libraries(${exec_name} "-framework Foundation")
     endif()
     if(EXTRA_LIB_TARGETS)
         target_link_libraries(${exec_name} ${EXTRA_LIB_TARGETS})

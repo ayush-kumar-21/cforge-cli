@@ -49,12 +49,11 @@ pub fn run() {
         }
         match lang {
             "obj_c" | "obj_cpp" => {
-                let ok = if os() == Os::Macos {
-                    run_capture("xcode-select", &["-p"]).is_some()
-                } else {
-                    crate::platform::command_exists("gnustep-config")
-                };
-                let runtime = if os() == Os::Macos { "apple-clang" } else { "gnustep" };
+                // Only reachable on macOS: all_langs() excludes obj_c/obj_cpp
+                // elsewhere, and the branch above already printed
+                // "unsupported" for them.
+                let ok = run_capture("xcode-select", &["-p"]).is_some();
+                let runtime = "apple-clang";
                 if ok {
                     let bad_pin = if lang == "obj_c" {
                         std_pin_status("CMAKE_OBJC_STANDARD", |v| {
