@@ -117,19 +117,42 @@ mod cross_check {
     use super::hex;
     use std::process::Command;
 
-    /// `-b` (binary mode) is not optional. The Windows runner resolves
-    /// `sha256sum` to the MSYS/Git-Bash build, which defaults to *text*
-    /// mode and silently folds CRLF to LF before hashing — and git checks
-    /// these files out with CRLF there. `std::fs::read` below sees the raw
-    /// bytes, so without `-b` the two disagree on every text file in the
-    /// repo, and the test fails on a difference that exists only in the
-    /// checker, never in the release binaries this guards.
-    fn system_sha256(path: &str) -> Option<String> {
-        for (bin, args) in [("sha256sum", vec!["-b", path]), ("shasum", vec!["-a", "256", "-b", path])] {
+    /// The tool to check against is chosen per platform to match the one
+    /// that actually produces that platform's published checksum in
+    /// release.yml: `shasum`/`sha256sum` on Unix, PowerShell's
+    /// `Get-FileHash` on Windows.
+    ///
+    /// Windows deliberately does *not* go through sha256sum. The runner
+    /// resolves it to an MSYS build whose path handling and text/binary
+    /// defaults are their own topic, and it is not what release.yml runs
+    /// there anyway — so checking against it tested a pairing that never
+    /// ships. `-b` on the Unix tools pins binary mode regardless.
+    ///
+    /// Returns the tool name alongside the digest so a failure says which
+    /// one disagreed.
+    fn system_sha256(path: &str) -> Option<(String, String)> {
+        #[cfg(windows)]
+        let attempts: Vec<(&str, Vec<String>)> = vec![(
+            "powershell",
+            vec![
+                "-NoProfile".to_string(),
+                "-Command".to_string(),
+                format!("(Get-FileHash -Algorithm SHA256 -LiteralPath '{path}').Hash"),
+            ],
+        )];
+        #[cfg(not(windows))]
+        let attempts: Vec<(&str, Vec<String>)> = vec![
+            ("sha256sum", vec!["-b".to_string(), path.to_string()]),
+            ("shasum", vec!["-a".to_string(), "256".to_string(), "-b".to_string(), path.to_string()]),
+        ];
+
+        for (bin, args) in attempts {
             if let Ok(out) = Command::new(bin).args(&args).output() {
                 if out.status.success() {
                     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-                    return stdout.split_whitespace().next().map(|s| s.to_string());
+                    if let Some(digest) = stdout.split_whitespace().next() {
+                        return Some((bin.to_string(), digest.to_lowercase()));
+                    }
                 }
             }
         }
@@ -147,10 +170,10 @@ mod cross_check {
         for name in ["Cargo.toml", "README.md", "src/platform.rs", "src/sha256.rs"] {
             let path = root.join(name);
             let Ok(bytes) = std::fs::read(&path) else { continue };
-            let Some(expected) = system_sha256(&path.to_string_lossy()) else { continue };
-            assert_eq!(hex(&bytes), expected, "mismatch on {name}");
+            let Some((tool, expected)) = system_sha256(&path.to_string_lossy()) else { continue };
+            assert_eq!(hex(&bytes), expected, "mismatch on {name} against {tool}");
             checked += 1;
         }
-        assert!(checked > 0, "no file could be cross-checked — is sha256sum/shasum on PATH?");
+        assert!(checked > 0, "no file could be cross-checked - is a system SHA-256 tool on PATH?");
     }
 }

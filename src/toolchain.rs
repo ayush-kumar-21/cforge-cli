@@ -6,7 +6,9 @@
 //! `-DCMAKE_C_COMPILER=<compiler>` / `-DCMAKE_CXX_COMPILER=<compiler>` to
 //! cmake for c/cpp entries.
 use crate::color;
-use crate::platform::{self, command_exists, ensure_pkg_manager, install_pkg, os, run_or_die, Os, PkgManager};
+use crate::platform::{
+    self, command_exists, ensure_pkg_manager, install_pkg, install_pkg_ok, os, run_or_die, Os, PkgManager,
+};
 use crate::project::validate_lang;
 use std::fs;
 use std::io::{IsTerminal, Write};
@@ -154,19 +156,47 @@ fn install_objc_macos(wait: bool) {
     platform::wait_for_xcode_clt();
 }
 
+/// Installs the first of `candidates` that the package manager accepts.
+///
+/// GNUstep and the GNU Objective-C compiler are spelled differently on
+/// every distro, and `install_pkg` is fatal on a miss — so the old fixed
+/// list killed `toolchain install obj_c` outright on Ubuntu, where
+/// `gnustep-base` simply does not exist as a package. Reports which name
+/// worked, since that is the thing worth knowing when a build later fails.
+fn install_first_available(role: &str, candidates: &[&str]) -> bool {
+    for pkg in candidates {
+        if install_pkg_ok(pkg) {
+            platform::status(&format!("installed {role}: {pkg}"));
+            return true;
+        }
+    }
+    eprintln!("Error: could not install {role} — tried: {}", candidates.join(", "));
+    eprintln!("Install it manually with your distro's package manager and re-run.");
+    false
+}
+
 fn install_objc_linux(runtime: &str) {
     ensure_pkg_manager();
     match runtime {
         "gnustep" => {
-            install_pkg("gobjc");
-            install_pkg("gnustep-devel");
-            install_pkg("gnustep-base");
-            platform::status("installed: gobjc, gnustep-base");
+            // Debian/Ubuntu: gobjc + gnustep-devel (which pulls in
+            // libgnustep-base-dev). Fedora: gcc-objc + gnustep-base-devel.
+            // Arch: gcc-objc + gnustep-base.
+            let compiler = install_first_available("Objective-C compiler", &["gobjc", "gcc-objc"]);
+            let base = install_first_available(
+                "GNUstep base",
+                &["gnustep-devel", "gnustep-base-devel", "libgnustep-base-dev", "gnustep-base"],
+            );
+            if !compiler || !base {
+                std::process::exit(1);
+            }
         }
         "libobjc2" => {
             install_pkg("clang");
-            install_pkg("libobjc2");
-            install_pkg("gnustep-libobjc2");
+            let base = install_first_available("libobjc2", &["libobjc2", "gnustep-libobjc2"]);
+            if !base {
+                std::process::exit(1);
+            }
             platform::status("installed: clang, libobjc2");
         }
         other => crate::usage_error(&format!("unknown --runtime '{other}' (expected: gnustep|libobjc2)")),
