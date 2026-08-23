@@ -175,7 +175,7 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
              Options:\n\
              \x20\x20--lang <lang>      Language to enable: c|cpp|obj_c|obj_cpp\n\
              \x20\x20--ffi rust         Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  src/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  links against it — for Rust projects calling into C/C++.\n\
              \x20\x20--template <name>  Scaffold a real starter program, natively implemented\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  for whichever language applies (--lang, or c if --lang\n\
@@ -216,11 +216,12 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
         ("build", _) => Some(
             "Usage: cforge build [target...]\n\n\
              Configures and builds. With no targets, builds every source file found\n\
-             across the enabled languages' directories. A target name is resolved by\n\
-             checking C/<name>.c, CPP/<name>.cpp, and (macOS only) Obj_C/<name>.m,\n\
-             Obj_CPP/<name>.mm. If two languages share a base name (C/foo.c and\n\
-             CPP/foo.cpp both exist), 'foo' is ambiguous — give the extension to\n\
-             pick one: 'cforge build foo.c' or 'cforge build foo.cpp'.",
+             across the enabled languages' directories (src/ by default for all of\n\
+             them). A target name is resolved by checking src/<name>.c,\n\
+             src/<name>.cpp, and (macOS only) src/<name>.m, src/<name>.mm. If a\n\
+             project has more than one language enabled and two share a base name\n\
+             (src/foo.c and src/foo.cpp both exist), 'foo' is ambiguous — give the\n\
+             extension to pick one: 'cforge build foo.c' or 'cforge build foo.cpp'.",
         ),
         ("run", _) => Some(
             "Usage: cforge run <target> [-- <args>...]\n\n\
@@ -315,7 +316,7 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
         ("compdb", _) => Some("Usage: cforge compdb\n\nWrites compile_commands.json at the project root."),
         ("config", Some("show")) => Some("Usage: cforge config show\n\nShows current .cforge.toml settings (source directories, build dir)."),
         ("config", Some("set")) => Some("Usage: cforge config set <key> <path>\n\nSets a source directory path. Keys: c_src, cpp_src, obj_c_src, obj_cpp_src, headers, build."),
-        ("config", Some("reset")) => Some("Usage: cforge config reset\n\nResets all paths in .cforge.toml to defaults (C/, CPP/, Obj_C/, etc.)."),
+        ("config", Some("reset")) => Some("Usage: cforge config reset\n\nResets all paths in .cforge.toml to defaults (src/ for every language, include/ for headers, build/)."),
         ("config", _) => Some("Usage: cforge config show|set|reset ...\n\nRun 'cforge config <subcommand> -h' for details on a specific one."),
         _ => None,
     };

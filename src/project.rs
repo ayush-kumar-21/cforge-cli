@@ -221,9 +221,9 @@ pub fn init() {
     let cfg = Config::load();
     // Only create directories for languages actually enabled for this
     // project (langs.txt if it's already been written, else the platform
-    // default set) — not all 4 unconditionally. Otherwise every project
-    // gets dead Obj_C/Obj_CPP folders on Windows, where they can never be
-    // built.
+    // default set) — not all 4 unconditionally. Otherwise every project on
+    // Windows gets a dead source directory for obj_c/obj_cpp, languages
+    // that can never be built there.
     let enabled = read_langs_file();
     let enabled: Vec<&str> =
         if enabled.is_empty() { all_langs().to_vec() } else { enabled.iter().map(|s| s.as_str()).collect() };

@@ -182,8 +182,8 @@ fn custom_source_and_build_dirs_still_build() {
     assert_ok(&run(&cforge, &base, &["new-c-app", "proj", "--template", "cli"]), "scaffold");
 
     let project_dir = base.join("proj");
-    std::fs::rename(project_dir.join("C"), project_dir.join("src")).unwrap();
-    assert_ok(&run(&cforge, &project_dir, &["config", "set", "c_src", "src"]), "config set c_src");
+    std::fs::rename(project_dir.join("src"), project_dir.join("source")).unwrap();
+    assert_ok(&run(&cforge, &project_dir, &["config", "set", "c_src", "source"]), "config set c_src");
     assert_ok(&run(&cforge, &project_dir, &["config", "set", "build", "out"]), "config set build");
     std::fs::remove_dir_all(project_dir.join("build")).ok();
 

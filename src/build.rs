@@ -139,8 +139,8 @@ mod resolve_tests {
     #[test]
     fn finds_single_match() {
         let base = scratch_dir("single");
-        fs::create_dir_all(base.join("C")).unwrap();
-        fs::write(base.join("C").join("foo.c"), "").unwrap();
+        fs::create_dir_all(base.join("src")).unwrap();
+        fs::write(base.join("src").join("foo.c"), "").unwrap();
         match resolve_target_in(&base, "foo") {
             ResolvedTarget::Found(t) => assert_eq!(t.suffix, "c"),
             other => panic!("expected Found, got {other:?}"),
@@ -150,7 +150,13 @@ mod resolve_tests {
 
     #[test]
     fn reports_ambiguous_matches() {
+        // c_src and cpp_src both default to "src" now (a project is one
+        // language), so this needs an explicit config pointing them at two
+        // different directories to even construct the scenario it's
+        // testing — the same-name-in-two-language-dirs case can't happen
+        // on the default config anymore.
         let base = scratch_dir("ambiguous");
+        fs::write(base.join(".cforge.toml"), "[paths]\nc_src = \"C\"\ncpp_src = \"CPP\"\n").unwrap();
         fs::create_dir_all(base.join("C")).unwrap();
         fs::create_dir_all(base.join("CPP")).unwrap();
         fs::write(base.join("C").join("foo.c"), "").unwrap();
@@ -175,14 +181,14 @@ mod resolve_tests {
     #[test]
     fn finds_app_directory_as_one_target() {
         let base = scratch_dir("app");
-        fs::create_dir_all(base.join("CPP").join("mygame")).unwrap();
-        fs::write(base.join("CPP").join("mygame").join("main.cpp"), "").unwrap();
-        fs::write(base.join("CPP").join("mygame").join("Player.cpp"), "").unwrap();
+        fs::create_dir_all(base.join("src").join("mygame")).unwrap();
+        fs::write(base.join("src").join("mygame").join("main.cpp"), "").unwrap();
+        fs::write(base.join("src").join("mygame").join("Player.cpp"), "").unwrap();
         match resolve_target_in(&base, "mygame") {
             ResolvedTarget::Found(t) => {
                 assert!(t.is_app);
                 assert_eq!(t.suffix, "cpp");
-                assert_eq!(t.path, base.join("CPP").join("mygame"));
+                assert_eq!(t.path, base.join("src").join("mygame"));
             }
             other => panic!("expected Found (app), got {other:?}"),
         }
@@ -192,7 +198,7 @@ mod resolve_tests {
     #[test]
     fn empty_directory_is_not_an_app_target() {
         let base = scratch_dir("emptyapp");
-        fs::create_dir_all(base.join("CPP").join("notanapp")).unwrap();
+        fs::create_dir_all(base.join("src").join("notanapp")).unwrap();
         match resolve_target_in(&base, "notanapp") {
             ResolvedTarget::NotFound => {}
             other => panic!("expected NotFound, got {other:?}"),
@@ -228,7 +234,10 @@ mod resolve_tests {
 
     #[test]
     fn extension_qualified_name_still_resolves_standalone_file() {
+        // Needs two distinct language directories to be a meaningful test
+        // of extension-qualification at all -- see reports_ambiguous_matches.
         let base = scratch_dir("qualified");
+        fs::write(base.join(".cforge.toml"), "[paths]\nc_src = \"C\"\ncpp_src = \"CPP\"\n").unwrap();
         fs::create_dir_all(base.join("C")).unwrap();
         fs::create_dir_all(base.join("CPP")).unwrap();
         fs::write(base.join("C").join("foo.c"), "").unwrap();

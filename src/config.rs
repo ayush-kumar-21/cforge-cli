@@ -1,5 +1,8 @@
 //! `.cforge.toml` configuration — allows flexible source directory layouts.
-//! Default paths: C/, CPP/, Obj_C/, Obj_CPP/ can be overridden per-project.
+//! Every language defaults to `src/` — a project is exactly one language
+//! (see project.rs's `lang_capability`), so there's no longer a reason to
+//! name the directory after the language the way `C/`/`CPP/`/`Obj_C/`/
+//! `Obj_CPP/` used to. Each is independently overridable per-project.
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -29,16 +32,16 @@ pub struct Paths {
 }
 
 fn default_c_src() -> String {
-    "C".to_string()
+    "src".to_string()
 }
 fn default_cpp_src() -> String {
-    "CPP".to_string()
+    "src".to_string()
 }
 fn default_obj_c_src() -> String {
-    "Obj_C".to_string()
+    "src".to_string()
 }
 fn default_obj_cpp_src() -> String {
-    "Obj_CPP".to_string()
+    "src".to_string()
 }
 fn default_headers() -> String {
     "include".to_string()
@@ -130,9 +133,10 @@ mod tests {
     #[test]
     fn default_config_has_standard_paths() {
         let cfg = Config::default();
-        assert_eq!(cfg.src_dir("c"), "C");
-        assert_eq!(cfg.src_dir("cpp"), "CPP");
-        assert_eq!(cfg.src_dir("obj_c"), "Obj_C");
+        assert_eq!(cfg.src_dir("c"), "src");
+        assert_eq!(cfg.src_dir("cpp"), "src");
+        assert_eq!(cfg.src_dir("obj_c"), "src");
+        assert_eq!(cfg.src_dir("obj_cpp"), "src");
     }
 
     #[test]
@@ -146,9 +150,9 @@ mod tests {
     #[test]
     fn custom_paths_can_be_set() {
         let mut cfg = Config::default();
-        cfg.paths.c_src = "src".to_string();
-        cfg.paths.cpp_src = "src".to_string();
-        assert_eq!(cfg.src_dir("c"), "src");
-        assert_eq!(cfg.src_dir("cpp"), "src");
+        cfg.paths.c_src = "source".to_string();
+        cfg.paths.cpp_src = "code".to_string();
+        assert_eq!(cfg.src_dir("c"), "source");
+        assert_eq!(cfg.src_dir("cpp"), "code");
     }
 }
