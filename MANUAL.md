@@ -63,7 +63,9 @@ needs one.
 
 ## Project layout
 
-A project created with `cforge new myapp --lang c cpp` looks like this:
+A project looks like this (shown here with both C and C++ enabled — `cforge
+new myapp --lang c`, then `cforge lang add cpp`; a fresh project only has the
+one directory for whichever language you picked):
 
 ```
 myapp/
@@ -145,8 +147,10 @@ command word — `cforge -v build foo` and `cforge build foo -v` are identical.
 
 #### `cforge new <name> [options]`
 
-Creates `<name>/`, writes `CMakeLists.txt`, creates the enabled languages'
-source directories plus `build/`, and records the languages in `langs.txt`.
+Creates `<name>/`, writes `CMakeLists.txt`, creates the language's source
+directory plus `build/`, and records it in `langs.txt`. A project is always
+exactly one language at creation — see [`lang add`](#languages) to grow into
+more afterward, deliberately.
 
 **With no `--lang` and no `--template`, run from an interactive terminal**,
 this prompts instead — npm-create-style: pick a language, then a template,
@@ -162,18 +166,17 @@ no template.
 
 | Option | Meaning |
 |---|---|
-| `--lang <lang>...` | Languages to enable: `c`, `cpp`, `obj_c`, `obj_cpp`. Default: `c` only |
+| `--lang <lang>` | Language to enable: `c`, `cpp`, `obj_c`, or `obj_cpp`. Default: `c` |
 | `--template <name>` | Scaffold a starter program — see [Templates](#templates) |
 | `--lib-type <kind>` | `static` (default) or `shared`. Only meaningful with `--template lib` |
 | `--ffi rust` | Scaffold a C ABI boundary plus a Rust `bindings/` crate — see [Rust FFI](#rust-ffi) |
 
-`--template` applies to the first `--lang` given (as typed, or as picked
-interactively), or to C if `--lang` was omitted.
+`--template` applies to `--lang` (as typed, or as picked interactively), or
+to C if `--lang` was omitted.
 
 ```sh
 cforge new myapp                # interactive: prompts for language + template
 cforge new myapp --lang cpp     # skips the language prompt only
-cforge new myapp --lang c cpp   # multiple languages — always explicit, never prompted
 cforge new mylib --template lib --lib-type shared
 ```
 
@@ -327,11 +330,14 @@ Uninstalls a compiler through the OS package manager. Refuses if
 ### Languages
 
 Enabled languages live in `langs.txt` and control which source directories are
-created and built.
+created and built. `cforge new` only ever starts a project at one language
+(`--lang`, or `c` by default) — `lang add`/`lang remove` are how you grow or
+shrink that set afterward, a deliberate step rather than something `new`
+itself does.
 
 ```sh
-cforge lang add cpp obj_c     # enable languages
-cforge lang remove obj_c      # disable
+cforge lang add cpp obj_c     # enable more languages, on top of what's there
+cforge lang remove obj_c      # disable one
 cforge lang list              # show what is enabled
 ```
 

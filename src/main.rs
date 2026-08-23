@@ -111,7 +111,6 @@ pub fn usage() -> ! {
     for line in [
         "cforge new myapp",
         "cforge new myapp --lang cpp",
-        "cforge new myapp --lang c cpp",
         "cforge new mytool --template cli",
         "cforge new mylib --template lib --lib-type shared",
         "cforge new myheaders --template header-lib",
@@ -163,25 +162,24 @@ pub fn usage_error(msg: &str) -> ! {
 fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
     let text: Option<&str> = match (cmd, sub) {
         ("new", _) => Some(
-            "Usage: cforge new <name> [--lang <lang>...] [--ffi rust] [--template <name>] [--lib-type <kind>]\n\n\
+            "Usage: cforge new <name> [--lang <lang>] [--ffi rust] [--template <name>] [--lib-type <kind>]\n\n\
              Scaffolds a new project directory: creates <name>/, writes CMakeLists.txt,\n\
-             creates the enabled languages' source directories plus build/, and enables\n\
-             the given languages (default: just c — a project is single-language unless\n\
-             --lang says otherwise).\n\n\
+             creates the language's source directory plus build/, and enables it (default:\n\
+             c — a project is always exactly one language).\n\n\
              With neither --lang nor --template given, and run from an interactive\n\
              terminal, prompts for a language then a template instead — npm-create-style,\n\
              the same two-step flow 'new-<lang>-app' uses except the language step is a\n\
-             menu too. Single-select only: a project is always one language. Pass --lang\n\
-             explicitly to skip the prompts (a script, CI, or a non-interactive shell\n\
-             gets the old default automatically: single language c, no template).\n\n\
+             menu too. Both are single-select. Pass --lang explicitly to skip the prompts\n\
+             (a script, CI, or a non-interactive shell gets the old default automatically:\n\
+             c, no template).\n\n\
              Options:\n\
-             \x20\x20--lang <lang>...   Languages to enable (c|cpp|obj_c|obj_cpp)\n\
+             \x20\x20--lang <lang>      Language to enable: c|cpp|obj_c|obj_cpp\n\
              \x20\x20--ffi rust         Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  CPP/<name>_ffi.cpp) and a bindings/ Rust crate that\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  links against it — for Rust projects calling into C/C++.\n\
              \x20\x20--template <name>  Scaffold a real starter program, natively implemented\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  for whichever language applies (the first --lang given,\n\
-             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  or c if --lang was omitted). One of:\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  for whichever language applies (--lang, or c if --lang\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20  was omitted). One of:\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20    cli         a command-line app\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20    lib         a compiled library (see --lib-type)\n\
              \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20    header-lib  a header-only library + example\n\
@@ -273,7 +271,13 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
         ("toolchain", Some("list")) => Some("Usage: cforge toolchain list\n\nShows detected cc/c++ and any project overrides in toolchain.txt."),
         ("toolchain", Some("default")) => Some("Usage: cforge toolchain default\n\nResets toolchain.txt, returning to system-default compilers."),
         ("toolchain", _) => Some("Usage: cforge toolchain list|install|use|default|remove ...\n\nRun 'cforge toolchain <subcommand> -h' for details on a specific one."),
-        ("lang", Some("add")) => Some("Usage: cforge lang add <lang>...\n\nEnables the given languages (c|cpp|obj_c|obj_cpp) for the build."),
+        ("lang", Some("add")) => Some(
+            "Usage: cforge lang add <lang>...\n\n\
+             Enables the given languages (c|cpp|obj_c|obj_cpp) for the build, in addition to\n\
+             whatever's already enabled. 'cforge new' only ever starts a project at one\n\
+             language, but nothing stops it growing into more over time — this is that\n\
+             deliberate, explicit step; it never happens as a side effect of 'new' itself.",
+        ),
         ("lang", Some("remove")) => Some("Usage: cforge lang remove <lang>...\n\nDisables the given languages from the build."),
         ("lang", _) => Some("Usage: cforge lang add|remove|list <lang>..."),
         ("std", Some("set")) => Some(
@@ -332,30 +336,11 @@ fn wants_subcommand_help(args: &[String]) -> bool {
     args.iter().any(|a| a == "-h" || a == "--help")
 }
 
-fn split_lang_flag(args: &[String]) -> (Vec<String>, Vec<String>) {
-    // Pulls "--lang a b c" out of `args`, returning (langs, remaining_args).
-    let mut langs = Vec::new();
-    let mut remaining = Vec::new();
-    let mut i = 0;
-    let mut in_lang = false;
-    while i < args.len() {
-        if args[i] == "--lang" {
-            in_lang = true;
-        } else if in_lang && !args[i].starts_with('-') {
-            langs.push(args[i].clone());
-        } else {
-            in_lang = false;
-            remaining.push(args[i].clone());
-        }
-        i += 1;
-    }
-    (langs, remaining)
-}
-
-/// Pulls a single-valued flag (e.g. "--ffi <target>") out of `args`,
-/// returning (Some(value), remaining_args). Unlike `--lang`, these take
-/// exactly one value, so this doesn't need `split_lang_flag`'s multi-value
-/// scanning loop.
+/// Pulls a single-valued flag (e.g. "--ffi <target>" or "--lang <lang>")
+/// out of `args`, returning (Some(value), remaining_args). `--lang` used to
+/// need its own multi-value scanning loop back when a project could enable
+/// several languages at once; a project is always exactly one language now,
+/// so it takes exactly one value like every other flag here.
 fn split_value_flag(args: &[String], flag: &str) -> (Option<String>, Vec<String>) {
     let mut value = None;
     let mut remaining = Vec::new();
@@ -437,7 +422,7 @@ fn main() {
 
     match cmd {
         "new" => {
-            let (langs, remaining) = split_lang_flag(args);
+            let (lang, remaining) = split_value_flag(args, "--lang");
             let (ffi, remaining) = split_value_flag(&remaining, "--ffi");
             let (template, remaining) = split_value_flag(&remaining, "--template");
             let (lib_type, remaining) = split_value_flag(&remaining, "--lib-type");
@@ -462,25 +447,29 @@ fn main() {
             // (--quiet, --dry-run, or a non-interactive shell) or the user
             // cancels, in which case this behaves exactly as before: single
             // language "c", no template.
-            let (langs, template, lib_type) = if langs.is_empty() && template.is_none() {
+            let (lang, template, lib_type) = if lang.is_none() && template.is_none() {
                 match templates::prompt_language() {
-                    Some(lang) => {
+                    Some(picked) => {
                         let (t, lt) = templates::prompt_choice();
-                        (vec![lang], t, lt)
+                        (Some(picked), t, lt)
                     }
-                    None => (langs, template, lib_type),
+                    None => (lang, template, lib_type),
                 }
             } else {
-                (langs, template, lib_type)
+                (lang, template, lib_type)
             };
 
-            // Which language --template applies to: the first --lang given
-            // (as typed, or just picked above), or the single-language
-            // default (c) if --lang was omitted entirely. Each of
-            // c/cpp/obj_c/obj_cpp has its own native template implementation
-            // (see templates/mod.rs).
-            let template_lang = langs.first().cloned().unwrap_or_else(|| "c".to_string());
+            // Which language --template applies to: --lang (as typed, or
+            // just picked above), or the single-language default (c) if it
+            // was omitted entirely. Each of c/cpp/obj_c/obj_cpp has its own
+            // native template implementation (see templates/mod.rs).
+            let template_lang = lang.clone().unwrap_or_else(|| "c".to_string());
             let name = remaining.first().map(|s| s.as_str()).unwrap_or("");
+            // A project is always one language: 0 or 1 elements, never more
+            // — new_project()/resolve_new_langs() still take a slice since
+            // that's also how new-<lang>-app below calls it, but --lang
+            // itself can no longer name more than one.
+            let langs: Vec<String> = lang.into_iter().collect();
             project::new_project(name, &langs);
             if let Some(target) = ffi {
                 ffi::validate_ffi_target(&target);
@@ -649,7 +638,7 @@ fn main() {
             _ => usage_error("expected 'deps sync' or 'deps show'"),
         },
         "generate" => {
-            let (langs, remaining) = split_lang_flag(args);
+            let (lang, remaining) = split_value_flag(args, "--lang");
             let (template, remaining) = split_value_flag(&remaining, "--template");
             let (lib_type, remaining) = split_value_flag(&remaining, "--lib-type");
             if let Some(t) = &template {
@@ -670,7 +659,7 @@ fn main() {
             // the common case, since `cforge new` defaults to one — there's
             // nothing to disambiguate, so infer it instead of making every
             // call spell out --lang for a project that only has one choice.
-            let lang = langs.first().cloned().unwrap_or_else(project::infer_single_lang);
+            let lang = lang.unwrap_or_else(project::infer_single_lang);
             match template {
                 // Full template into the current project, by name — the
                 // "create a library named X" path: 'cforge generate mylib

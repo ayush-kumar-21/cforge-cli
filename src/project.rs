@@ -142,10 +142,10 @@ pub fn lang_list() {
 /// Resolves the language for `cforge generate`/`cforge new` when --lang was
 /// omitted, by looking at what's already enabled in langs.txt. Only answers
 /// when that's unambiguous — exactly one language enabled — since a project
-/// is single-language by default now; a project with several languages
-/// enabled (an explicit `--lang c cpp` project) or none at all (langs.txt
-/// missing/empty) both still require --lang spelled out rather than being
-/// guessed at.
+/// is always exactly one language at creation; a project with several
+/// languages enabled (grown that way deliberately via `lang add`, after
+/// creation) or none at all (langs.txt missing/empty) both still require
+/// --lang spelled out rather than being guessed at.
 pub fn infer_single_lang() -> String {
     match read_langs_file().as_slice() {
         [only] => only.clone(),
@@ -238,12 +238,12 @@ pub fn init() {
     platform::status("Initialized CMakeLists.txt and project directories.");
 }
 
-/// An explicit --lang list is the exact set for this project, not an
-/// addition to the platform defaults — `lang_add` (used by `lang add`,
-/// where "add to what's there" is the right semantics) would otherwise
-/// just merge it into the full default set. Empty means "no --lang given",
-/// which now means "just c" — a project is single-language unless --lang
-/// says otherwise.
+/// `langs` is 0 or 1 elements — `main.rs`'s `--lang` parsing only ever
+/// yields one language now, unlike `lang_add`'s `<lang>...` (used by
+/// `lang add`, where "add to what's there" is the right semantics for a
+/// project growing into more languages after creation). Empty means "no
+/// --lang given", which means "just c" — a project is exactly one language,
+/// and this is where that language is chosen at creation time.
 fn resolve_new_langs(langs: &[String]) -> Vec<String> {
     let mut explicit: Vec<String> = if langs.is_empty() {
         vec!["c".to_string()]
@@ -373,10 +373,13 @@ mod capability_tests {
         assert_eq!(resolve_new_langs(&[]), vec!["c".to_string()]);
     }
 
+    /// The CLI's --lang parsing only ever produces 0 or 1 elements now (a
+    /// project is always exactly one language), so this only exercises
+    /// that one-element case — the shape resolve_new_langs actually sees
+    /// in practice.
     #[test]
-    fn explicit_lang_list_is_used_as_is() {
+    fn explicit_lang_is_used_as_is() {
         assert_eq!(resolve_new_langs(&["cpp".to_string()]), vec!["cpp".to_string()]);
-        assert_eq!(resolve_new_langs(&["cpp".to_string(), "c".to_string()]), vec!["c".to_string(), "cpp".to_string()]);
     }
 }
 

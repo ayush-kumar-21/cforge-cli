@@ -19,6 +19,14 @@ library (or app, or test target) into a project that already exists —
 forms: when the project has exactly one language enabled, cforge infers it
 rather than requiring every call to spell it out.
 
+**`cforge new --lang` takes exactly one language now, not a list.** The
+interactive picker above only ever lets you choose one, so letting the flag
+accept several (`--lang c cpp`) was a leftover from before a project was
+single-language — a way to end up somewhere the picker can't send you. A
+project is always exactly one language at creation; `cforge lang add` is
+still there for growing into more afterward, deliberately, as a separate
+step. `--lang` on `cforge generate` was already single-valued.
+
 ## 0.1.0 — 2026-08-22
 
 First public release.
