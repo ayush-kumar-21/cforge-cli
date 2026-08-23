@@ -6,8 +6,18 @@ name: ci
 # and branch protection reads whichever it likes. No branch filter, so a PR
 # from any branch arrives with its checks already green.
 # Trade-off: PRs from forks get no CI, since their commits never land here.
+#
+# tags-ignore: '**' -- a v*.*.* tag push also triggers release.yml, and
+# scripts-powershell actually installs and runs whatever cforge release is
+# currently published (not just lints). Without this, that step raced
+# release.yml's own publish job for the exact tag just pushed: the install
+# ran, found no release yet (or the previous one, mid-replacement), and
+# failed on a commit that was already green moments earlier on its branch
+# push. The commit itself doesn't need re-testing on the tag ref too.
 on:
   push:
+    tags-ignore:
+      - '**'
 
 # Superseded pushes to the same branch stop building. Safe here because each
 # push is its own SHA, so a cancelled run can never taint a later commit's
