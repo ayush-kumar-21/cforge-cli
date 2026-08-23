@@ -127,8 +127,24 @@ jobs:
       - name: List what will be published
         run: ls -l dist
 
+      # semver's own convention: a 0.x version is still unstable, so mark it
+      # as a GitHub pre-release rather than "Latest" — matches SECURITY.md's
+      # "cforge is pre-1.0 and moves fast". Flips to a real release on its
+      # own the day Cargo.toml crosses 1.0.0, with no workflow edit needed.
+      - name: Determine prerelease status from the tag's major version
+        id: prerelease
+        run: |
+          major="${GITHUB_REF_NAME#v}"
+          major="${major%%.*}"
+          if [ "$major" = "0" ]; then
+            echo "value=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
+          prerelease: ${{ steps.prerelease.outputs.value }}
           files: dist/*
