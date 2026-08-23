@@ -139,6 +139,26 @@ pub fn lang_list() {
     }
 }
 
+/// Resolves the language for `cforge generate`/`cforge new` when --lang was
+/// omitted, by looking at what's already enabled in langs.txt. Only answers
+/// when that's unambiguous — exactly one language enabled — since a project
+/// is single-language by default now; a project with several languages
+/// enabled (an explicit `--lang c cpp` project) or none at all (langs.txt
+/// missing/empty) both still require --lang spelled out rather than being
+/// guessed at.
+pub fn infer_single_lang() -> String {
+    match read_langs_file().as_slice() {
+        [only] => only.clone(),
+        [] => crate::usage_error(
+            "generate requires --lang <lang> (no languages enabled — run 'cforge lang add <lang>' first, or pass --lang)",
+        ),
+        langs => crate::usage_error(&format!(
+            "generate requires --lang <lang> (multiple languages enabled: {} — pass --lang to pick one)",
+            langs.join(", ")
+        )),
+    }
+}
+
 pub fn generate(name: &str, ext: &str) {
     if name.is_empty() {
         crate::usage_error("generate requires a name");
@@ -357,5 +377,24 @@ mod capability_tests {
     fn explicit_lang_list_is_used_as_is() {
         assert_eq!(resolve_new_langs(&["cpp".to_string()]), vec!["cpp".to_string()]);
         assert_eq!(resolve_new_langs(&["cpp".to_string(), "c".to_string()]), vec!["c".to_string(), "cpp".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod infer_single_lang_tests {
+    use super::*;
+
+    /// The one case `infer_single_lang` actually resolves: exactly one
+    /// language enabled — the common case now that a project is
+    /// single-language by default. The two ambiguous cases (zero or
+    /// several languages enabled) exit(2) via usage_error, which can't be
+    /// asserted on directly in-process (same reason validate_lang's
+    /// Unsupported/exit(3) branch has no direct test either).
+    #[test]
+    fn resolves_when_exactly_one_lang_is_enabled() {
+        crate::platform::in_scratch_dir("infer_one", || {
+            write_langs_file(&["cpp".to_string()]);
+            assert_eq!(infer_single_lang(), "cpp");
+        });
     }
 }

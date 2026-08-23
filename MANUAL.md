@@ -148,6 +148,18 @@ command word — `cforge -v build foo` and `cforge build foo -v` are identical.
 Creates `<name>/`, writes `CMakeLists.txt`, creates the enabled languages'
 source directories plus `build/`, and records the languages in `langs.txt`.
 
+**With no `--lang` and no `--template`, run from an interactive terminal**,
+this prompts instead — npm-create-style: pick a language, then a template,
+from arrow-key menus. Both are single-select; a project is always exactly
+one language. This is the same two-step flow `new-<lang>-app` (below) uses,
+except the language step is also a menu rather than being fixed by which
+command you typed.
+
+Passing `--lang` and/or `--template` explicitly skips the corresponding
+prompt. So does anywhere without a terminal to prompt on — a script, CI, a
+pipe — which falls back to the old default silently: single language `c`,
+no template.
+
 | Option | Meaning |
 |---|---|
 | `--lang <lang>...` | Languages to enable: `c`, `cpp`, `obj_c`, `obj_cpp`. Default: `c` only |
@@ -155,13 +167,13 @@ source directories plus `build/`, and records the languages in `langs.txt`.
 | `--lib-type <kind>` | `static` (default) or `shared`. Only meaningful with `--template lib` |
 | `--ffi rust` | Scaffold a C ABI boundary plus a Rust `bindings/` crate — see [Rust FFI](#rust-ffi) |
 
-`--template` applies to the first `--lang` given, or to C if `--lang` was
-omitted.
+`--template` applies to the first `--lang` given (as typed, or as picked
+interactively), or to C if `--lang` was omitted.
 
 ```sh
-cforge new myapp
-cforge new myapp --lang cpp
-cforge new myapp --lang c cpp
+cforge new myapp                # interactive: prompts for language + template
+cforge new myapp --lang cpp     # skips the language prompt only
+cforge new myapp --lang c cpp   # multiple languages — always explicit, never prompted
 cforge new mylib --template lib --lib-type shared
 ```
 
@@ -414,14 +426,30 @@ rebuild.
 
 ### Code tools
 
-#### `cforge generate <name> --lang <lang>`
+#### `cforge generate <name> [options]`
 
-Creates a new source file from that language's template, in the right
-directory for the language.
+Adds to the current project by name — the command for creating a single file,
+or a whole library (or app, or test target), inside a project that already
+exists.
+
+| Option | Meaning |
+|---|---|
+| `--lang <lang>` | `c`, `cpp`, `obj_c`, or `obj_cpp`. Inferred when the project has exactly one language enabled; required otherwise |
+| `--template <name>` | One of the five templates in [Templates](#templates) — omit for a plain empty file |
+| `--lib-type <kind>` | `static` (default) or `shared`. Only meaningful with `--template lib` |
 
 ```sh
-cforge generate binarySearch --lang cpp
+cforge generate binarySearch --lang cpp   # a single empty file
+cforge generate mylib --template lib      # a library, --lang inferred
 ```
+
+`--template` reuses the exact scaffolding `cforge new --template` uses — the
+only difference is the target project already exists rather than being
+created fresh. `--lang` is optional on both forms whenever the project has
+exactly one language enabled, which is the default now that a project is
+single-language unless `--lang` said otherwise at creation time. With zero or
+several languages enabled, `--lang` is required and cforge says so rather
+than guessing.
 
 #### `cforge format [path...]`
 

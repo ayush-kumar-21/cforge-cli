@@ -26,6 +26,7 @@ you. cforge is a friendlier layer on top of CMake, not a replacement for it.
 - [Your first project](#your-first-project)
 - [Everyday commands](#everyday-commands)
 - [Project templates](#project-templates)
+- [Adding to an existing project](#adding-to-an-existing-project)
 - [Adding libraries](#adding-libraries)
 - [Updating and uninstalling](#updating-and-uninstalling)
 - [Troubleshooting](#troubleshooting)
@@ -94,17 +95,41 @@ cforge --help      # the full command list
 ### 1. Create the project
 
 ```sh
+cforge new myapp
+```
+
+Run from a terminal with nothing else typed, `cforge new` prompts you —
+npm-create-style: pick a language, then a starter template from an arrow-key
+menu. A project is always one language; the menu is single-select.
+
+```
+? Select a language ›
+❯ c
+  cpp
+  obj_c
+  obj_cpp
+
+? Select a starter template ›
+  none — bare project, no starter files
+❯ cli
+  lib
+  header-lib
+  test
+  server
+```
+
+Prefer to skip the prompts? Name the language directly — `new-cpp-app`,
+`new-c-app`, `new-objc-app`, `new-objcpp-app` — and only the template menu
+shows:
+
+```sh
 cforge new-cpp-app myapp --template cli
 cd myapp
 ```
 
-This creates a `myapp/` directory containing a small working command-line
-program, a generated `CMakeLists.txt`, and the source layout cforge expects.
-You do not need to edit any build files to get going.
-
-Use `new-c-app`, `new-objc-app`, or `new-objcpp-app` for the other languages.
-Leave off `--template` and cforge shows an arrow-key menu of the available
-starter templates.
+Either way you get a `myapp/` directory containing a small working
+command-line program, a generated `CMakeLists.txt`, and the source layout
+cforge expects. You do not need to edit any build files to get going.
 
 ### 2. Build it
 
@@ -132,14 +157,18 @@ That is the whole loop: **edit source, `cforge build`, `cforge run`.**
 
 ### Starting from an empty project instead
 
-If you would rather write everything yourself, `cforge new` creates the project
-structure with no starter code:
+If you would rather write everything yourself, skip the picker by naming the
+language explicitly — `--lang` always means "no prompts, no starter code":
 
 ```sh
-cforge new myapp              # single-language C project
+cforge new myapp --lang c     # single-language C project
 cforge new myapp --lang cpp   # or C++
 cd myapp
 ```
+
+(In a script or CI — anywhere without a terminal to prompt on — bare
+`cforge new myapp` already behaves this way, defaulting to a single C
+project with no template.)
 
 You get a `CMakeLists.txt` plus source directories — `C/`, `CPP/`, `Obj_C/`,
 `Obj_CPP/` for the languages you enabled, and `include/` for headers. Drop a
@@ -173,6 +202,7 @@ project file in full.
 | `cforge run <target> [-- args]` | Build and run a target |
 | `cforge test [filter]` | Build and run tests through CTest |
 | `cforge clean [--all]` | Remove build artifacts (`--all` also wipes the CMake cache) |
+| `cforge generate <name>` | Add a file, or `--template lib` for a library, to the project |
 | `cforge add <library>` | Install and link a library |
 | `cforge info` | Show the project's languages, standards, and libraries |
 | `cforge doctor` | Diagnose your compiler and toolchain setup |
@@ -213,6 +243,36 @@ Or set the language explicitly, if you prefer one command:
 ```sh
 cforge new myapp --lang cpp --template lib --lib-type shared
 ```
+
+---
+
+## Adding to an existing project
+
+`cforge generate` adds to a project that already exists, rather than
+scaffolding a whole new one.
+
+**A single file**, the default:
+
+```sh
+cforge generate binarySearch --lang cpp
+```
+
+**A library, or any other template**, with `--template` — the same five
+templates from the table above, reused against the current project instead
+of a fresh one:
+
+```sh
+cforge generate mylib --template lib
+```
+
+`--lang` is optional on both forms: when the project has exactly one
+language enabled — the usual case, since a project is single-language by
+default — cforge infers it. Pass `--lang` explicitly if the project enables
+more than one.
+
+This is different from `cforge add`, just below: `generate` creates a new
+first-party file or library *in* your project; `add` installs and links a
+third-party library from your OS package manager.
 
 ---
 

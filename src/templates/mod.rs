@@ -63,6 +63,33 @@ fn make_dir(dir: &Path) {
     });
 }
 
+/// Arrow-key language picker for a bare `cforge new <name>` (no --lang, no
+/// --template): the npm-create-style flow `new-<lang>-app` already has,
+/// minus the language being fixed by which command you typed — here it's
+/// also a menu. Single-select only, matching cforge's one-language-per-
+/// project model; there is no multi-select variant of this prompt.
+///
+/// Options come from `all_langs()`, so the menu is exactly the languages
+/// this platform can build — obj_c/obj_cpp only appear where
+/// `objc_capable_platform()` is true. Rust is deliberately absent: cforge
+/// doesn't build Rust projects itself, `new-rust-app` is a separate,
+/// non-CMake path.
+///
+/// Same gating as `prompt_choice` below: never blocks where nothing could
+/// answer (no tty, --quiet, --dry-run) — `None` means "fall back to the
+/// existing default", same as a cancelled prompt.
+pub fn prompt_language() -> Option<String> {
+    let flags = crate::flags::get();
+    let interactive = std::io::stdin().is_terminal() && !flags.quiet && !flags.dry_run;
+    if !interactive {
+        return None;
+    }
+    let langs = crate::project::all_langs();
+    let idx =
+        dialoguer::Select::new().with_prompt("Select a language").items(langs).default(0).interact_opt().ok()??;
+    Some(langs[idx].to_string())
+}
+
 /// Arrow-key template picker for `cforge new-<lang>-app`: npm-create-style
 /// — the language is picked by which command you ran, then this picks a
 /// template from a menu. Returns (template, lib_type); template is `None`

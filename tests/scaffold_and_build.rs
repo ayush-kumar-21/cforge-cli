@@ -267,3 +267,29 @@ fn rescaffolding_ffi_preserves_hand_edits() {
 
     std::fs::remove_dir_all(&base).ok();
 }
+
+/// `cforge generate <name> --template <t>` is the "add a library (or app,
+/// or test target) to a project that already exists" path — the same
+/// per-language scaffolding `cforge new --template` does, reused against an
+/// existing project instead of a fresh one. With --lang omitted, it must
+/// infer the language from the project's one enabled language rather than
+/// requiring it spelled out every time, since a project is single-language
+/// by default now. Building is what actually proves both: a wrong inferred
+/// language, or a name/path mistake in the reused scaffolding path, shows
+/// up as a compile or link failure, not just a file existing on disk.
+#[test]
+#[ignore = "builds a real project via cmake + a compiler"]
+fn generate_template_infers_the_single_enabled_language() {
+    let cforge = cforge_bin();
+    let base = scratch_dir("generate_infer_lang");
+    assert_ok(&run(&cforge, &base, &["new-cpp-app", "proj", "--template", "cli"]), "scaffold cli app");
+
+    let project_dir = base.join("proj");
+    assert_ok(
+        &run(&cforge, &project_dir, &["generate", "mylib", "--template", "lib"]),
+        "'cforge generate mylib --template lib' with no --lang",
+    );
+    assert_ok(&run(&cforge, &project_dir, &["build"]), "'cforge build' after generate --template lib");
+
+    std::fs::remove_dir_all(&base).ok();
+}

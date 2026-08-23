@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+**`cforge new <name>` prompts interactively when run bare.** With no
+`--lang` and no `--template`, and run from a terminal, it now shows an
+npm-create-style picker — pick a language, then a starter template, both
+single-select arrow-key menus. This is the same two-step flow
+`new-<lang>-app` already had, except the language step is now also a menu
+instead of being fixed by which command you typed. Passing `--lang` and/or
+`--template` explicitly still skips the corresponding prompt, and anywhere
+without a terminal (a script, CI) falls back to the previous default
+silently: single language `c`, no template.
+
+**`cforge generate` can add more than an empty file.** `--template <name>`
+reuses the same five templates `cforge new --template` has, scaffolding a
+library (or app, or test target) into a project that already exists —
+`cforge generate mylib --template lib`. `--lang` is now optional on both
+forms: when the project has exactly one language enabled, cforge infers it
+rather than requiring every call to spell it out.
+
 ## 0.1.0 — 2026-08-22
 
 First public release.

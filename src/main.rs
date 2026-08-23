@@ -27,7 +27,7 @@ pub fn usage() -> ! {
     row(
         "new",
         "<name> [opts]",
-        "Scaffold a new project (single-language by default); run 'cforge new -h' for --lang/--ffi/--template",
+        "Scaffold a new project — bare, picks a language+template interactively; run 'cforge new -h' for opts",
     );
     row("new-c-app", "<name> [opts]", "Scaffold a C project; picks a template from a menu unless --template is given");
     row("new-cpp-app", "<name> [opts]", "Same as new-c-app, for C++");
@@ -81,7 +81,7 @@ pub fn usage() -> ! {
     row("deps sync", "", "Reinstall all linked libraries using deps.lock's pinned package names");
     println!();
     println!("CODE");
-    row("generate", "<name> --lang <lang>", "Create a new source file from a template");
+    row("generate", "<name> [opts]", "Create a file, or --template for a library/app; run 'cforge generate -h'");
     row("format", "[path...]", "Run clang-format over source files");
     row("lint", "[path...]", "Run clang-tidy over source files");
     row("compdb", "", "Write compile_commands.json for editor/tool integration");
@@ -139,6 +139,7 @@ pub fn usage() -> ! {
         "cforge remove openssl",
         "cforge search openssl",
         "cforge generate binarySearch --lang cpp",
+        "cforge generate mylib --template lib",
         "cforge format",
         "cforge package --format zip",
         "cforge self-update",
@@ -167,6 +168,12 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
              creates the enabled languages' source directories plus build/, and enables\n\
              the given languages (default: just c — a project is single-language unless\n\
              --lang says otherwise).\n\n\
+             With neither --lang nor --template given, and run from an interactive\n\
+             terminal, prompts for a language then a template instead — npm-create-style,\n\
+             the same two-step flow 'new-<lang>-app' uses except the language step is a\n\
+             menu too. Single-select only: a project is always one language. Pass --lang\n\
+             explicitly to skip the prompts (a script, CI, or a non-interactive shell\n\
+             gets the old default automatically: single language c, no template).\n\n\
              Options:\n\
              \x20\x20--lang <lang>...   Languages to enable (c|cpp|obj_c|obj_cpp)\n\
              \x20\x20--ffi rust         Scaffold a C ABI boundary (include/<name>_ffi.h,\n\
@@ -286,7 +293,19 @@ fn subcommand_help(cmd: &str, sub: Option<&str>) -> ! {
              repeating 'cforge add' for every dependency.",
         ),
         ("deps", _) => Some("Usage: cforge deps show|sync\n\nRun 'cforge deps <subcommand> -h' for details on a specific one."),
-        ("generate", _) => Some("Usage: cforge generate <name> --lang <lang>\n\nCreates an empty source file from a per-language template."),
+        ("generate", _) => Some(
+            "Usage: cforge generate <name> [--lang <lang>] [--template <name>] [--lib-type <kind>]\n\n\
+             Adds to the current project. By default, a single empty source file. With\n\
+             --template, the same five real starter templates 'cforge new --template' has —\n\
+             this is how to add a library (or app, or test target) to a project that\n\
+             already exists: 'cforge generate mylib --template lib'.\n\n\
+             Options:\n\
+             \x20\x20--lang <lang>       c|cpp|obj_c|obj_cpp. Inferred when the project has\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20 exactly one language enabled; required otherwise.\n\
+             \x20\x20--template <name>   cli|lib|header-lib|test|server\n\
+             \x20\x20--lib-type <kind>   static (default) or shared — only used with\n\
+             \x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20\x20 --template lib.",
+        ),
         ("format", _) => Some("Usage: cforge format [path...]\n\nRuns clang-format -i over the given paths (default: all source dirs)."),
         ("lint", _) => Some("Usage: cforge lint [path...]\n\nRuns clang-tidy over the given paths (default: all source dirs)."),
         ("compdb", _) => Some("Usage: cforge compdb\n\nWrites compile_commands.json at the project root."),
@@ -427,10 +446,39 @@ fn main() {
             }
             let lib_type = lib_type.unwrap_or_else(|| "static".to_string());
             templates::validate_lib_type(&lib_type);
+
+            // A truly bare `cforge new <name>` — no --lang, no --template —
+            // goes interactive, npm-create-style: pick a language, then a
+            // template, the same two-step flow `new-<lang>-app` uses except
+            // the language step is a menu here too instead of being fixed by
+            // which command you typed. Single-select for the language, same
+            // as the template picker below — a project is one language.
+            //
+            // Any explicit --lang and/or --template opts out of the
+            // corresponding prompt, so scripted/non-interactive use (and the
+            // documented "empty project" flow, `cforge new foo --lang cpp`)
+            // is unaffected. prompt_language() itself falls back to `None`
+            // with nothing prompted at all when there's no tty to ask
+            // (--quiet, --dry-run, or a non-interactive shell) or the user
+            // cancels, in which case this behaves exactly as before: single
+            // language "c", no template.
+            let (langs, template, lib_type) = if langs.is_empty() && template.is_none() {
+                match templates::prompt_language() {
+                    Some(lang) => {
+                        let (t, lt) = templates::prompt_choice();
+                        (vec![lang], t, lt)
+                    }
+                    None => (langs, template, lib_type),
+                }
+            } else {
+                (langs, template, lib_type)
+            };
+
             // Which language --template applies to: the first --lang given
-            // (as typed), or the single-language default (c) if --lang was
-            // omitted entirely. Each of c/cpp/obj_c/obj_cpp has its own
-            // native template implementation (see templates/mod.rs).
+            // (as typed, or just picked above), or the single-language
+            // default (c) if --lang was omitted entirely. Each of
+            // c/cpp/obj_c/obj_cpp has its own native template implementation
+            // (see templates/mod.rs).
             let template_lang = langs.first().cloned().unwrap_or_else(|| "c".to_string());
             let name = remaining.first().map(|s| s.as_str()).unwrap_or("");
             project::new_project(name, &langs);
@@ -450,8 +498,8 @@ fn main() {
         // command you type (no --lang needed), then the template is picked
         // from an arrow-key menu (templates::prompt_choice) unless
         // --template was given explicitly. obj_c/obj_cpp still go through
-        // project::new_project's validate_lang, so the existing
-        // macOS-full/Linux-caveats/Windows-unsupported rules still apply.
+        // project::new_project's validate_lang, so the existing macOS-only
+        // rule still applies.
         "new-c-app" | "new-cpp-app" | "new-objc-app" | "new-objcpp-app" => {
             let lang = match cmd {
                 "new-c-app" => "c",
@@ -602,10 +650,37 @@ fn main() {
         },
         "generate" => {
             let (langs, remaining) = split_lang_flag(args);
+            let (template, remaining) = split_value_flag(&remaining, "--template");
+            let (lib_type, remaining) = split_value_flag(&remaining, "--lib-type");
+            if let Some(t) = &template {
+                templates::validate_template(t);
+            }
+            let lib_type = lib_type.unwrap_or_else(|| "static".to_string());
+            templates::validate_lib_type(&lib_type);
             let name = remaining.first().map(|s| s.as_str()).unwrap_or("");
-            let lang =
-                langs.first().map(|s| s.as_str()).unwrap_or_else(|| usage_error("generate requires --lang <lang>"));
-            project::generate(name, lang);
+            if name.is_empty() {
+                // project::generate() already checks this on the no-template
+                // path, but templates::scaffold() (the --template path) has
+                // no such guard of its own — it would happily write into
+                // "<src_dir>//..." otherwise. Check up front so both paths
+                // get the same error.
+                usage_error("generate requires a name");
+            }
+            // --lang is optional now: with exactly one language enabled —
+            // the common case, since `cforge new` defaults to one — there's
+            // nothing to disambiguate, so infer it instead of making every
+            // call spell out --lang for a project that only has one choice.
+            let lang = langs.first().cloned().unwrap_or_else(project::infer_single_lang);
+            match template {
+                // Full template into the current project, by name — the
+                // "create a library named X" path: 'cforge generate mylib
+                // --template lib' reuses the exact scaffolding 'cforge new
+                // --template lib' does, just against a project that already
+                // exists instead of a fresh one.
+                Some(t) => templates::scaffold(&t, name, &lib_type, &lang),
+                // Default: a single empty source file, as before.
+                None => project::generate(name, &lang),
+            }
         }
         "format" => codetools::format(args),
         "lint" => codetools::lint(args),
