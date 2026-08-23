@@ -183,15 +183,16 @@ include(CTest)
 enable_testing()
 
 # Source directory paths — configured via .cforge.toml, injected into CMake
-# via .cforge_config.cmake. This allows flexible project layouts (src/ instead
-# of C/, etc.). If .cforge_config.cmake doesn't exist yet, use defaults.
+# via .cforge_config.cmake. This allows flexible project layouts. If
+# .cforge_config.cmake doesn't exist yet, fall back to the same "src"
+# default every language uses.
 if(EXISTS "${CMAKE_SOURCE_DIR}/.cforge_config.cmake")
     include("${CMAKE_SOURCE_DIR}/.cforge_config.cmake")
 else()
-    set(CFORGE_C_SRC "C")
-    set(CFORGE_CPP_SRC "CPP")
-    set(CFORGE_OBJ_C_SRC "Obj_C")
-    set(CFORGE_OBJ_CPP_SRC "Obj_CPP")
+    set(CFORGE_C_SRC "src")
+    set(CFORGE_CPP_SRC "src")
+    set(CFORGE_OBJ_C_SRC "src")
+    set(CFORGE_OBJ_CPP_SRC "src")
     set(CFORGE_HEADERS "include")
 endif()
 
@@ -323,8 +324,9 @@ endfunction()
 #    `enable_testing()` above.
 function(add_lang_apps src_dir ext needs_foundation)
     # IS_DIRECTORY/EXISTS in if() only have well-defined behavior with an
-    # absolute path — src_dir arrives as the relative "CPP"/"C"/etc., which
-    # silently evaluated false and made this return immediately every time.
+    # absolute path — src_dir arrives as a relative dirname (e.g. "src"),
+    # which silently evaluated false and made this return immediately
+    # every time.
     set(abs_dir "${CMAKE_SOURCE_DIR}/${src_dir}")
     if(NOT IS_DIRECTORY "${abs_dir}")
         return()

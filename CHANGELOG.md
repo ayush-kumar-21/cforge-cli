@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+**Every language now defaults to `src/` instead of `C/`/`CPP/`/`Obj_C/`/
+`Obj_CPP/`.** A project is exactly one language (see 0.1.0's notes below), so
+naming the source directory after which language it is no longer pulls its
+weight — `src/` is what nearly every other ecosystem defaults to, and a C
+project showing a folder named `C` read as unusual rather than idiomatic.
+
+Both `c_src` and `cpp_src` (and the two Objective-C keys) can still be set
+independently via `.cforge.toml`/`cforge config set` — a project grown into
+more than one language with `cforge lang add` shares `src/` by default too
+(files are told apart by extension, not by directory), but can be split back
+into separate directories the same way.
+
 ## 0.1.0 — 2026-08-22
 
 First public release.

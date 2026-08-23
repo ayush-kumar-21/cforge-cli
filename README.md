@@ -170,18 +170,18 @@ cd myapp
 `cforge new myapp` already behaves this way, defaulting to a single C
 project with no template.)
 
-You get a `CMakeLists.txt` plus source directories — `C/`, `CPP/`, `Obj_C/`,
-`Obj_CPP/` for the languages you enabled, and `include/` for headers. Drop a
-file with a `main()` into the matching directory and it becomes a build target
-automatically:
+You get a `CMakeLists.txt` plus a `src/` directory — every language defaults
+to the same one, since a project is a single language — and `include/` for
+headers. Drop a file with a `main()` into `src/` and it becomes a build
+target automatically:
 
 ```sh
-echo 'int main(){return 0;}' > C/hello.c
+echo 'int main(){return 0;}' > src/hello.c
 cforge build
 cforge run hello              # target name = the file name, minus extension
 ```
 
-A subdirectory of source files (`CPP/myapp/main.cpp`, `CPP/myapp/util.cpp`)
+A subdirectory of source files (`src/myapp/main.cpp`, `src/myapp/util.cpp`)
 builds into one executable named after that directory, so multi-file programs
 need no configuration either.
 

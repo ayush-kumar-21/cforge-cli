@@ -47,9 +47,10 @@ generated files are ordinary CMake you can read or take with you.
 **No configure step.** `cforge build` configures on first use and reuses that
 configuration afterwards. `cforge clean --all` forces a fresh configure.
 
-**Convention over configuration.** Source files live in per-language
-directories (`C/`, `CPP/`, `Obj_C/`, `Obj_CPP/`), and cforge turns what it
-finds there into build targets automatically — nothing to register by hand.
+**Convention over configuration.** Source files live in `src/` — every
+language defaults to the same directory, since a project is exactly one
+language — and cforge turns what it finds there into build targets
+automatically, nothing to register by hand.
 
 **Languages are opt-in per project.** A new project enables only C unless
 `--lang` says otherwise. Enabled languages are recorded in `langs.txt`, and
@@ -63,9 +64,7 @@ needs one.
 
 ## Project layout
 
-A project looks like this (shown here with both C and C++ enabled — `cforge
-new myapp --lang c`, then `cforge lang add cpp`; a fresh project only has the
-one directory for whichever language you picked):
+A project looks like this:
 
 ```
 myapp/
@@ -76,16 +75,21 @@ myapp/
 ├── libs.txt              linked libraries
 ├── toolchain.txt         per-language compiler pins (only if you set one)
 ├── deps.lock             resolved package names per platform
-├── C/                    C sources
-├── CPP/                  C++ sources
+├── src/                  source files for the project's language
 ├── include/              public headers
 └── build/                CMake build directory (all artifacts land here)
 ```
 
-Only the directories for enabled languages are created. `Obj_C/` and
-`Obj_CPP/` appear on macOS and Linux when those languages are enabled, never
-on Windows. Any of these paths can be changed — see
+Every language defaults to `src/` — a project is exactly one language, so
+there's no need to name the directory after which one. Any of these paths
+can be changed — see
 [Project layout configuration](#project-layout-configuration).
+
+Grow a project into more than one language later with `cforge lang add` (see
+[Languages](#languages)), and both still share `src/` by default: cforge
+tells files apart by extension (`*.c` vs `*.cpp`), not by directory. Give a
+language its own directory instead by setting `c_src`/`cpp_src`/etc.
+independently.
 
 ---
 
@@ -96,7 +100,7 @@ Inside a language's source directory, cforge recognizes three shapes:
 **1. A standalone source file → one executable.**
 
 ```
-CPP/tool.cpp        →  target 'tool'
+src/tool.cpp        →  target 'tool'
 ```
 
 **2. A subdirectory of source files → one executable, named after the
@@ -104,8 +108,8 @@ directory.** All files sharing the language's extension are compiled and
 linked together. This is how multi-file programs work:
 
 ```
-CPP/myapp/main.cpp
-CPP/myapp/util.cpp  →  target 'myapp' (one binary, both files linked)
+src/myapp/main.cpp
+src/myapp/util.cpp  →  target 'myapp' (one binary, both files linked)
 ```
 
 **3. A subdirectory with special markers → a library or a test.**
@@ -117,9 +121,10 @@ CPP/myapp/util.cpp  →  target 'myapp' (one binary, both files linked)
 
 Both markers are what `--template lib` and `--template test` set up for you.
 
-**Name collisions across languages.** If `C/foo.c` and `CPP/foo.cpp` both
-exist, the target name `foo` is ambiguous. Pass the extension to disambiguate:
-`cforge build foo.c` or `cforge build foo.cpp`.
+**Name collisions across languages.** If a project has more than one language
+enabled and both `src/foo.c` and `src/foo.cpp` exist, the target name `foo`
+is ambiguous. Pass the extension to disambiguate: `cforge build foo.c` or
+`cforge build foo.cpp`.
 
 ---
 
@@ -181,7 +186,7 @@ cforge new mylib --template lib --lib-type shared
 ```
 
 Without `--template`, you get the structure and no source code. Add your own
-files to `C/` or `CPP/` and they become targets.
+files to `src/` and they become targets.
 
 #### `cforge new-c-app|new-cpp-app|new-objc-app|new-objcpp-app <name> [options]`
 
@@ -412,16 +417,16 @@ generated `.cforge_config.cmake`.
 
 ```sh
 cforge config show                 # current paths
-cforge config set cpp_src src      # move C++ sources to src/
+cforge config set cpp_src source   # move C++ sources to source/
 cforge config reset                # back to defaults
 ```
 
 | Key | Default |
 |---|---|
-| `c_src` | `C` |
-| `cpp_src` | `CPP` |
-| `obj_c_src` | `Obj_C` |
-| `obj_cpp_src` | `Obj_CPP` |
+| `c_src` | `src` |
+| `cpp_src` | `src` |
+| `obj_c_src` | `src` |
+| `obj_cpp_src` | `src` |
 | `headers` | `include` |
 | `build` | `build` |
 
@@ -537,7 +542,7 @@ cforge new mylib --lang c --template lib --lib-type shared
 call into your C++ code:
 
 - `include/<name>_ffi.h` — the C ABI header
-- `CPP/<name>_ffi.cpp` — the implementation
+- `src/<name>_ffi.cpp` — the implementation
 - `bindings/` — a Rust crate that links against the built library
 
 C++ is enabled automatically, since the implementation is a `.cpp` file. Build
@@ -603,7 +608,7 @@ echo every command cforge runs underneath.
 |---|---|
 | `cforge: command not found` after installing | The PATH change has not reached your shell. Open a new terminal window |
 | `No rule to make target '<name>'` | The target was never registered — the file may be in the wrong directory, or its language is not in `langs.txt`. Check `cforge lang list` |
-| `'foo' is ambiguous` | `C/foo.c` and `CPP/foo.cpp` both exist. Build `foo.c` or `foo.cpp` explicitly |
+| `'foo' is ambiguous` | Both `src/foo.c` and `src/foo.cpp` exist (multiple languages enabled). Build `foo.c` or `foo.cpp` explicitly |
 | A build cannot find a library you added | The package manager name and the pkg-config/vcpkg module name differ. Find the real name with `cforge search <name>`, then fix `libs.txt` |
 | Stale or nonsensical build errors | `cforge clean --all`, then `cforge build` |
 | Wrong compiler being used | `cforge toolchain list`, then `cforge toolchain use <lang> <compiler>` |
