@@ -1,32 +1,5 @@
 # Changelog
 
-## Unreleased
-
-**`cforge new <name>` prompts interactively when run bare.** With no
-`--lang` and no `--template`, and run from a terminal, it now shows an
-npm-create-style picker — pick a language, then a starter template, both
-single-select arrow-key menus. This is the same two-step flow
-`new-<lang>-app` already had, except the language step is now also a menu
-instead of being fixed by which command you typed. Passing `--lang` and/or
-`--template` explicitly still skips the corresponding prompt, and anywhere
-without a terminal (a script, CI) falls back to the previous default
-silently: single language `c`, no template.
-
-**`cforge generate` can add more than an empty file.** `--template <name>`
-reuses the same five templates `cforge new --template` has, scaffolding a
-library (or app, or test target) into a project that already exists —
-`cforge generate mylib --template lib`. `--lang` is now optional on both
-forms: when the project has exactly one language enabled, cforge infers it
-rather than requiring every call to spell it out.
-
-**`cforge new --lang` takes exactly one language now, not a list.** The
-interactive picker above only ever lets you choose one, so letting the flag
-accept several (`--lang c cpp`) was a leftover from before a project was
-single-language — a way to end up somewhere the picker can't send you. A
-project is always exactly one language at creation; `cforge lang add` is
-still there for growing into more afterward, deliberately, as a separate
-step. `--lang` on `cforge generate` was already single-valued.
-
 ## 0.1.0 — 2026-08-22
 
 First public release.
@@ -38,14 +11,31 @@ anything that already works with CMake still works.
 
 ### Project setup
 
-- **`cforge new <name>`** scaffolds a project: `CMakeLists.txt`, the enabled
-  languages' source directories, and `build/`. Single-language (`c`) unless
-  `--lang` says otherwise.
+- **`cforge new <name>`** scaffolds a project: `CMakeLists.txt`, the
+  language's source directory, and `build/`. A project is always exactly one
+  language — `c` by default, or whatever `--lang` names, which takes exactly
+  one value.
+- **Run bare — no `--lang`, no `--template` — from a terminal, `cforge new`
+  prompts interactively**, npm-create-style: pick a language, then a starter
+  template, both single-select arrow-key menus. Passing `--lang` and/or
+  `--template` explicitly skips the corresponding prompt; anywhere without a
+  terminal (a script, CI) falls back silently to the default: `c`, no
+  template.
 - **npm-create-style shortcuts** pick the language for you: `new-c-app`,
   `new-cpp-app`, `new-objc-app`, `new-objcpp-app`, and `new-rust-app` (which
   delegates to `cargo new` — cforge does not build Rust projects itself). An
   arrow-key menu offers a starter template unless `--template` is given.
 - **`cforge init`** sets cforge up in a directory of existing sources.
+- **`cforge generate <name>`** adds to a project that already exists: a
+  single empty source file by default, or — with `--template <name>` — a
+  full library, app, or test target, reusing the exact scaffolding `cforge
+  new --template` uses. `--lang` is optional on both forms when the project
+  has exactly one language enabled, which cforge infers instead of making
+  every call spell it out.
+- **`cforge lang add`/`cforge lang remove`** grow or shrink a project's
+  enabled languages after creation — a deliberate, separate step from `new`,
+  for a directory of sources cforge didn't scaffold itself (typically one
+  set up via `cforge init`).
 - **Five templates per language**, each written in that language's own
   idioms rather than one language's template with a different file
   extension: `cli`, `lib` (`--lib-type static|shared`), `header-lib`, `test`
