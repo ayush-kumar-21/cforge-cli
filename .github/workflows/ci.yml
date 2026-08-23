@@ -90,7 +90,7 @@ jobs:
       # a claim in a manifest that nothing ever tests — it drifts upward the
       # first time anyone uses a newer std API, and users on an older
       # toolchain find out instead of CI.
-      - uses: dtolnay/rust-toolchain@1.85.0
+      - uses: dtolnay/rust-toolchain@1.100.0
 
       - run: cargo check --all-targets --locked
 
