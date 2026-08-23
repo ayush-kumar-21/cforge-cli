@@ -66,9 +66,21 @@ try {
     # fine" - whoever can substitute the binary can also 404 the checksum.
     Write-Host "Verifying checksum..."
     try {
-        $Expected = (Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Asset.sha256").Content
+        $RawExpected = (Invoke-WebRequest -UseBasicParsing -Uri "$Base/$Asset.sha256").Content
     } catch {
         throw "Could not fetch the published checksum for $Asset. Refusing to install an unverified binary."
+    }
+    # .Content's type depends on the response's declared content type, not
+    # on what's actually in the body: GitHub serves this file as
+    # application/octet-stream, which Invoke-WebRequest treats as binary
+    # and hands back as a byte[] rather than a string, even though the
+    # bytes are plain ASCII hex. Both shapes need handling explicitly
+    # rather than assuming one -- .Trim() straight on a byte[] throws
+    # "does not contain a method named 'Trim'".
+    if ($RawExpected -is [byte[]]) {
+        $Expected = [System.Text.Encoding]::UTF8.GetString($RawExpected)
+    } else {
+        $Expected = $RawExpected
     }
     $Expected = $Expected.Trim().ToLower()
     $Actual = (Get-FileHash -Algorithm SHA256 $TmpBin).Hash.ToLower()
