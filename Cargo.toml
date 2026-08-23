@@ -1,6 +1,6 @@
 [package]
 name = "cforge"
-version = "0.1.0"
+version = "0.1.0-2"
 edition = "2021"
 # Verified with `cargo +1.85.0 check --all-targets --locked`. The floor is
 # set by zeroize 1.9 (via dialoguer), which declares 1.85; Cargo.lock is

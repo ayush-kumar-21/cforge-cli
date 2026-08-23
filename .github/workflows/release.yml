@@ -31,13 +31,23 @@ jobs:
             exit 1
           fi
 
+      # Accepts either an exact '## <version>' heading (a version folded
+      # into its own section) or a live '## Unreleased' section -- an
+      # interim pre-release like this one, cut before the version it
+      # belongs to is finalized, doesn't warrant renaming it yet. Either
+      # way, the point is a release never ships with nothing describing
+      # what's in it.
       - name: Changelog has an entry for this version
         run: |
           version="${GITHUB_REF_NAME#v}"
-          if ! grep -q "^## $version" CHANGELOG.md; then
-            echo "::error::CHANGELOG.md has no '## $version' section"
-            exit 1
+          if grep -q "^## $version" CHANGELOG.md; then
+            exit 0
           fi
+          if grep -q "^## Unreleased" CHANGELOG.md; then
+            exit 0
+          fi
+          echo "::error::CHANGELOG.md has no '## $version' section and no '## Unreleased' section"
+          exit 1
 
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked
