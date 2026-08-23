@@ -50,23 +50,29 @@ existing binary untouched. Fail-open on a missing checksum would be no
 protection — an attacker positioned to substitute the binary can equally
 make the checksum request fail.
 
-To check a manual download yourself:
+**Finding the current release:** cforge is pre-1.0 and its releases are
+tagged as GitHub pre-releases (see above), so the usual
+`releases/latest/download/...` shortcut doesn't resolve — that URL
+specifically excludes pre-releases. All three installers resolve the actual
+current tag first (github.com's redirect on `releases/latest`, falling back
+to the API's release list if that doesn't point at one), then download from
+`releases/download/<tag>/<asset>` directly. This is why it's also fail-closed:
+"could not determine which release to install" refuses to guess rather than
+falling back to something unverified.
+
+To check a manual download yourself, get the current tag from the
+[Releases page](https://github.com/ayush-kumar-21/cforge-cli/releases) and
+substitute it below:
 
 ```sh
-curl -fsSLO https://github.com/ayush-kumar-21/cforge-cli/releases/latest/download/cforge-linux-x86_64
-curl -fsSL  https://github.com/ayush-kumar-21/cforge-cli/releases/latest/download/cforge-linux-x86_64.sha256
+TAG=v0.1.0   # whatever the Releases page currently shows
+curl -fsSLO https://github.com/ayush-kumar-21/cforge-cli/releases/download/$TAG/cforge-linux-x86_64
+curl -fsSL  https://github.com/ayush-kumar-21/cforge-cli/releases/download/$TAG/cforge-linux-x86_64.sha256
 sha256sum cforge-linux-x86_64   # must match the .sha256 contents
 ```
 
-Also check that the artifact came from the
-[Releases page](https://github.com/ayush-kumar-21/cforge-cli/releases) rather than a
+Also check that the artifact came from the Releases page itself rather than a
 fork or mirror.
-
-**Note:** the checksum files start with the first release tagged after this
-change. `cforge self-update` always fetches `releases/latest`, so it is only
-affected if run against an older release that predates them — in which case
-it will refuse, and reinstalling via `install.sh` once a newer release is
-tagged resolves it.
 
 What this does *not* cover: the binaries are not code-signed or notarized,
 so macOS Gatekeeper still treats them as unidentified, and the checksum

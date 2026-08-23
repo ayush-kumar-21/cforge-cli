@@ -130,3 +130,16 @@ jobs:
           $issues = Invoke-ScriptAnalyzer -Path . -Severity Error,Warning -ExcludeRule PSAvoidUsingWriteHost
           if ($issues) { $issues | Format-Table -AutoSize | Out-String | Write-Host; exit 1 }
           Write-Host "PSScriptAnalyzer: no errors or warnings"
+
+      # Actually runs install.ps1 against the real, live repo -- not just
+      # lint. Static analysis alone would never have caught a wrong tag or
+      # a working-on-my-mental-model-but-not-on-real-Windows redirect
+      # resolution, since neither of us can run PowerShell locally.
+      # cforge.exe ending up on disk and reporting the right version is the
+      # only thing that actually proves the install flow still works.
+      - shell: pwsh
+        run: |
+          .\install.ps1
+          $exe = Join-Path $HOME ".local\bin\cforge.exe"
+          if (-not (Test-Path $exe)) { throw "install.ps1 ran but $exe does not exist" }
+          & $exe --version

@@ -89,6 +89,14 @@ fetched at all, aborts and leaves any existing binary untouched. The SHA-256
 implementation is std-only and checked against the NIST FIPS 180-4 vectors
 in-tree. See [SECURITY.md](SECURITY.md).
 
+Releases are published as GitHub pre-releases while cforge is pre-1.0
+(derived from the tag's own major version — no manual flag per release), so
+the `releases/latest` shortcut — which specifically excludes pre-releases —
+doesn't resolve to anything yet. All three installers resolve the actual
+current tag themselves (the fast redirect-based path first, falling back to
+the release-list API only when that doesn't point at one) rather than
+silently failing to find a release to install.
+
 ### Known limitations
 
 - `cforge config set build <dir>` does not locate artifacts on Windows: the

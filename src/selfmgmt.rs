@@ -40,15 +40,93 @@ fn release_asset_name() -> Option<&'static str> {
     }
 }
 
-fn asset_url(asset: &str) -> String {
-    format!("https://github.com/{REPO}/releases/latest/download/{asset}")
+fn asset_url(tag: &str, asset: &str) -> String {
+    format!("https://github.com/{REPO}/releases/download/{tag}/{asset}")
+}
+
+/// Resolves which release to install: `releases/latest`'s redirect target
+/// first (github.com, not the rate-limited API — a redirect to
+/// `.../releases/tag/<TAG>` when a non-prerelease release exists). cforge
+/// is pre-1.0 (see SECURITY.md), so right now there isn't one, and that
+/// redirects to the bare `/releases` list instead — `redirect_tag` returns
+/// `None` for that shape. Falls back to the API's release list, whose
+/// first entry is the newest release regardless of prerelease status;
+/// that's subject to the unauthenticated API's 60-requests-per-hour-per-IP
+/// limit, so it's only paid while there's no stable release to redirect
+/// to — once cforge ships one, this reverts to the cheap path on its own.
+fn resolve_release_tag() -> Option<String> {
+    redirect_tag().or_else(api_latest_tag)
+}
+
+fn redirect_tag() -> Option<String> {
+    let url = format!("https://github.com/{REPO}/releases/latest");
+    let location = match os() {
+        Os::Windows => {
+            // HttpWebRequest rather than Invoke-WebRequest: its exception
+            // shape on a non-2xx response differs between Windows
+            // PowerShell 5.1 and PowerShell 7, and this has to work under
+            // whichever the machine has. HttpWebRequest/HttpWebResponse
+            // are the same stable .NET type on both.
+            let script = "$req = [System.Net.HttpWebRequest]::Create('".to_string()
+                + &url
+                + "'); $req.AllowAutoRedirect = $false; $req.Method = 'HEAD'; \
+                   try { $resp = $req.GetResponse(); $resp.Headers['Location']; $resp.Close() } \
+                   catch [System.Net.WebException] { $_.Exception.Response.Headers['Location'] }";
+            let out = Command::new("powershell").args(["-NoProfile", "-Command", &script]).output().ok()?;
+            String::from_utf8(out.stdout).ok()?.trim().to_string()
+        }
+        _ => {
+            if !command_exists("curl") {
+                return None;
+            }
+            let out =
+                Command::new("curl").args(["-s", "-o", "/dev/null", "-w", "%{redirect_url}", &url]).output().ok()?;
+            String::from_utf8(out.stdout).ok()?.trim().to_string()
+        }
+    };
+    location.split_once("/releases/tag/").map(|(_, tag)| tag.to_string())
+}
+
+fn api_latest_tag() -> Option<String> {
+    let url = format!("https://api.github.com/repos/{REPO}/releases");
+    let out = match os() {
+        Os::Windows => Command::new("powershell")
+            .args(["-NoProfile", "-Command", &format!("(Invoke-WebRequest -UseBasicParsing -Uri '{url}').Content")])
+            .output()
+            .ok()?,
+        _ => {
+            if !command_exists("curl") {
+                return None;
+            }
+            Command::new("curl").args(["-s", &url]).output().ok()?
+        }
+    };
+    if !out.status.success() {
+        return None;
+    }
+    parse_first_tag_name(&String::from_utf8(out.stdout).ok()?)
+}
+
+/// Hand-parses just the first `"tag_name"` field out of the JSON array
+/// GitHub's release-list API returns (newest first) rather than pulling in
+/// a JSON crate for one field — same reasoning as sha256.rs: this is the
+/// self-updater's integrity path, the last place to widen the dependency
+/// tree it exists to protect. A response with no such field (an error
+/// body, a rate-limit message, an empty release list) naturally yields
+/// `None` here without any special-casing.
+fn parse_first_tag_name(body: &str) -> Option<String> {
+    let after_key = body.split_once("\"tag_name\"")?.1;
+    let after_colon = after_key.split_once(':')?.1.trim_start();
+    let quoted = after_colon.strip_prefix('"')?;
+    let (tag, _) = quoted.split_once('"')?;
+    Some(tag.to_string())
 }
 
 /// Fetches the `<asset>.sha256` published alongside each release binary by
 /// release.yml. `None` means it could not be retrieved at all — which is
 /// treated as a hard failure by the caller, not as "unverified but fine".
-fn download_expected_digest(asset: &str) -> Option<String> {
-    let url = asset_url(&format!("{asset}.sha256"));
+fn download_expected_digest(tag: &str, asset: &str) -> Option<String> {
+    let url = asset_url(tag, &format!("{asset}.sha256"));
     let out = match os() {
         Os::Windows => Command::new("powershell")
             .args(["-NoProfile", "-Command", &format!("(Invoke-WebRequest -UseBasicParsing -Uri '{url}').Content")])
@@ -83,12 +161,12 @@ fn parse_digest(text: &str) -> Option<String> {
 /// download, or a mismatch all return false. Fail-open on a *missing*
 /// checksum would be no protection at all — anyone able to substitute the
 /// binary over the wire can equally make the checksum fetch 404.
-fn verify_download(asset: &str, file: &std::path::Path) -> bool {
-    let Some(expected) = download_expected_digest(asset) else {
+fn verify_download(tag: &str, asset: &str, file: &std::path::Path) -> bool {
+    let Some(expected) = download_expected_digest(tag, asset) else {
         eprintln!(
             "Error: could not fetch the published checksum for {asset}.\n\
              Refusing to install an unverified binary. Retry, or download it manually from\n\
-             https://github.com/{REPO}/releases/latest and check it yourself."
+             https://github.com/{REPO}/releases/tag/{tag} and check it yourself."
         );
         return false;
     };
@@ -109,8 +187,8 @@ fn verify_download(asset: &str, file: &std::path::Path) -> bool {
     true
 }
 
-fn download_asset(asset: &str, dest: &std::path::Path) -> bool {
-    let url = asset_url(asset);
+fn download_asset(tag: &str, asset: &str, dest: &std::path::Path) -> bool {
+    let url = asset_url(tag, asset);
     match os() {
         Os::Windows => {
             let script = format!("Invoke-WebRequest -Uri '{url}' -OutFile '{}'", dest.display());
@@ -136,11 +214,18 @@ fn try_update_from_release() -> bool {
     let Some(asset) = release_asset_name() else {
         return false;
     };
+    let Some(tag) = resolve_release_tag() else {
+        eprintln!(
+            "Warning: could not determine which release to install (GitHub may be rate-limiting \
+             this IP); trying a local source rebuild instead."
+        );
+        return false;
+    };
     let dest = installed_path();
     let tmp = dest.with_extension("new");
 
-    println!("Downloading latest release ({asset})...");
-    if !download_asset(asset, &tmp) {
+    println!("Downloading {tag} ({asset})...");
+    if !download_asset(&tag, asset, &tmp) {
         eprintln!("Warning: could not download the latest release; trying a local source rebuild instead.");
         fs::remove_file(&tmp).ok();
         return false;
@@ -152,7 +237,7 @@ fn try_update_from_release() -> bool {
     // means something is wrong with the release or the network path, and
     // quietly building from whatever happens to be on disk instead is not
     // the right answer to a possible tampering signal.
-    if !verify_download(asset, &tmp) {
+    if !verify_download(&tag, asset, &tmp) {
         fs::remove_file(&tmp).ok();
         std::process::exit(1);
     }
@@ -301,7 +386,7 @@ pub fn uninstall_self() {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_digest;
+    use super::{parse_digest, parse_first_tag_name};
 
     #[test]
     fn accepts_a_bare_digest_and_the_sha256sum_form() {
@@ -324,5 +409,37 @@ mod tests {
         assert_eq!(parse_digest("deadbeef"), None, "too short");
         assert_eq!(parse_digest(&"a".repeat(65)), None, "too long");
         assert_eq!(parse_digest(&"z".repeat(64)), None, "not hex");
+    }
+
+    /// The exact compact shape `curl`/`Invoke-WebRequest` actually hand
+    /// back for `GET /repos/{owner}/{repo}/releases` — no space after the
+    /// colon, `tag_name` not the first key in the object. Captured live
+    /// from the real endpoint, not guessed, since a hand-rolled parser is
+    /// only as good as the fixture it's checked against.
+    #[test]
+    fn extracts_tag_name_from_a_real_response() {
+        let body = r#"[{"url":"https://api.github.com/repos/o/r/releases/1","tag_name":"v0.1.0","draft":false,"prerelease":true}]"#;
+        assert_eq!(parse_first_tag_name(body).as_deref(), Some("v0.1.0"));
+    }
+
+    /// GitHub's API is also willing to pretty-print (a space after the
+    /// colon) depending on how it's queried — `trim_start()` in the parser
+    /// exists specifically to not care which form shows up.
+    #[test]
+    fn tolerates_a_space_after_the_colon() {
+        let body = r#"[{"tag_name": "v1.2.3"}]"#;
+        assert_eq!(parse_first_tag_name(body).as_deref(), Some("v1.2.3"));
+    }
+
+    /// No release published yet, and GitHub's own error bodies (rate
+    /// limit, 404) — none of these contain a "tag_name" field, so the
+    /// parser has to fail closed on all of them rather than panicking or
+    /// fabricating a tag.
+    #[test]
+    fn rejects_bodies_with_no_tag_name() {
+        assert_eq!(parse_first_tag_name("[]"), None);
+        assert_eq!(parse_first_tag_name(""), None);
+        assert_eq!(parse_first_tag_name(r#"{"message":"API rate limit exceeded","documentation_url":"..."}"#), None);
+        assert_eq!(parse_first_tag_name("<!DOCTYPE html><html>404</html>"), None);
     }
 }
